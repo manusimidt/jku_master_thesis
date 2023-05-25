@@ -1,0 +1,7 @@
+name: master
+channels:
+  - conda-forge
+  - pytorch
+  - defaults
+dependencies:
+  - python=3.9.7

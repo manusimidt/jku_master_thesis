@@ -1,0 +1,1 @@
+python -m crafter.run_gui
