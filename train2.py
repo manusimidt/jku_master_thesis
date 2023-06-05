@@ -65,16 +65,15 @@ def train(Mx: VanillaEnv, My: VanillaEnv, net, optim) -> float:
     # calculate psm
     psm = torch.tensor(psm_tot(actionsY, actionsX)).to(device)
     psm_metric = torch.exp(-psm / beta)
-    loss_tensor = torch.empty(statesY.shape[0])
+    loss = 0
     # loop over each state x
     for state_idx in range(statesY.shape[0]):
         # best_match = np.argmax(psm[state_idx])
         best_match = torch.argmax(psm_metric[state_idx])
 
-        target_y = statesY[state_idx]
-        positive_x = statesX[best_match]
-        # negative_x = np.delete(statesX, best_match, axis=0)
-        negative_x = torch.cat((statesX[:best_match], statesX[best_match + 1:]), dim=0)
+        target_y = statesY[state_idx] # this is y
+        positive_x = statesX[best_match] # this is x_y
+        negative_x = torch.cat((statesX[:best_match], statesX[best_match + 1:]), dim=0) # this are all x without x_y
 
         # pass the positive pairs through the network
         positive_x_logits, target_logits = net.forward(torch.stack((target_y, positive_x)), contrastive=True)
@@ -91,10 +90,10 @@ def train(Mx: VanillaEnv, My: VanillaEnv, net, optim) -> float:
         sum_term = torch.sum(
             (1 - psm_metric_negative[:, state_idx]) * torch.exp(inv_temp * negative_sim))
 
-        loss = -torch.log(nominator / (nominator + sum_term))
-        loss_tensor[state_idx] = loss
+        loss += -torch.log(nominator / (nominator + sum_term))
+        
 
-    total_loss = torch.mean(loss_tensor)
+    total_loss = loss/statesY.shape[0]
     optim.zero_grad()
     total_loss.backward()
     optim.step()
@@ -115,7 +114,7 @@ if __name__ == '__main__':
         VanillaEnv(configurations=[(34, 20)]), VanillaEnv(configurations=[(26, 28)]),
         VanillaEnv(configurations=[(29, 28)]), VanillaEnv(configurations=[(34, 28)]),
     ]
-    K = 2_000
+    K = 500
     beta = 0.01
     inv_temp = 1.0  # lambda
     net = ActorNet().to(device)
@@ -125,7 +124,7 @@ if __name__ == '__main__':
         # Sample a pair of training MDPs
         Mx, My = random.sample(training_MDPs, 2)
         error = train(Mx, My, net, optim)
-        print(f"Epoch {i}. Loss: {error:.3f}")
+        print(f"Epoch {i}. Loss: {error:.3f} convX:{Mx.configurations}, convY:{My.configurations}")
         total_errors.append(error)
 
     xpoints = np.arange(len(total_errors))
