@@ -1,15 +1,17 @@
 import random
-
+import torch.nn as nn
 import numpy as np
 import torch
 from torch.utils.data import Dataset, DataLoader
 
+import torch.optim as optim
 from env import VanillaEnv
 from typing import List
 
 from policy import ActorNet
 from rl.common.buffer2 import Episode, Transition
 import torch.nn.functional as F
+
 
 class ContrastiveDataset(Dataset):
     def __init__(self, statesX: torch.tensor, actionsX: torch.tensor, statesY: torch.tensor, actionsY: torch.tensor):
@@ -79,46 +81,63 @@ def psm_tot(x_arr, y_arr, gamma=0.99):
 
 
 @torch.enable_grad()
-def train(data, net):
+def train(data, net, optim):
     device = next(net.parameters()).device
     net.train()
     errors = []
 
     for batch in data:
-        statesX, actionsX = batch[0], batch[1]
-        statesY, actionsY = batch[2], batch[3]
-        print(statesX.shape, actionsX.shape)
-        # todo build positive and negative pairs
+        statesX, actionsX = batch[0].to(device), batch[1]
+        statesY, actionsY = batch[2].to(device), batch[3]
 
         # loop over each episode in the batch
         for episode_idx in range(statesX.shape[0]):
+            episode_errs = []
             curr_statesX, curr_actionX = statesX[episode_idx], actionsX[episode_idx]
             curr_statesY, curr_actionY = statesY[episode_idx], actionsY[episode_idx]
 
             # calculate psm
-            psm = psm_tot(curr_actionX, curr_actionY)
-            psm_metric = np.exp(-psm/beta)
+            psm = torch.tensor(psm_tot(curr_actionY, curr_actionX)).to(device)
+            psm_metric = torch.exp(-psm / beta)
             # loop over each state x
-            for state_idx in range(curr_statesX.shape[0]):
-                # best_batch = np.argmin(psm[state_idx])
-                best_batch = np.argmax(psm_metric[state_idx])
+            for state_idx in range(curr_statesY.shape[0]):
+                # best_match = np.argmin(psm[state_idx])
+                best_match = torch.argmax(psm_metric[state_idx])
 
-                positive_pair = torch.stack((curr_statesX[state_idx], curr_statesY[best_batch]))
-                negative_pairs = np.delete(curr_statesY, best_batch, axis=0)
-
+                target_y = curr_statesY[state_idx]
+                positive_x = curr_statesX[best_match]
+                # negative_x = np.delete(curr_statesX, best_match, axis=0)
+                negative_x = torch.cat((curr_statesX[:best_match], curr_statesX[best_match + 1:]), dim=0)
 
                 # pass the positive pairs through the network
-                positive_logits = net.forward(positive_pair, contrastive=True)
+                positive_x_logits, target_logits = net.forward(torch.stack((target_y, positive_x)), contrastive=True)
+                negative_x_logits = net.forward(negative_x, contrastive=True)
+
                 # this is s_\theta(x_y, y)
-                s_theta = F.cosine_similarity(positive_logits[0], positive_logits[1], dim=0)
+                positive_sim = F.cosine_similarity(positive_x_logits, target_logits, dim=0)
+                nominator = psm_metric[state_idx, best_match] * torch.exp(inv_temp * positive_sim)
 
-                nominator = psm_metric[state_idx, best_batch] * torch.exp(s_theta)
+                negative_sim = F.cosine_similarity(negative_x_logits, target_logits, dim=1)
+                # psm_metric_negative = np.delete(psm_metric.cpu().numpy(), best_match.cpu().item(), axis=0)
+                psm_metric_negative = torch.cat((psm_metric[:best_match], psm_metric[best_match + 1:]), dim=0)
 
-                
+                sum_term = torch.sum(
+                    (1 - psm_metric_negative[:, state_idx]) * torch.exp(inv_temp * negative_sim))
 
-                print(positive_pair, negative_pairs)
+                loss = nominator / (nominator + sum_term)
+                errors.append(loss.item())
+                episode_errs.append(loss.item())
+                optim.zero_grad()
+                loss.backward()
+                optim.step()
+            print(f"Loss: {np.mean(errors):.4f} Loss episode: {np.mean(episode_errs):.4f}")
+    return errors
+
 
 if __name__ == '__main__':
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    print("Training on ", device)
+
     training_MDPs = [
         VanillaEnv(configurations=[(26, 12)]), VanillaEnv(configurations=[(29, 12)]),
         VanillaEnv(configurations=[(34, 12)]), VanillaEnv(configurations=[(26, 20)]),
@@ -127,12 +146,13 @@ if __name__ == '__main__':
     ]
     K = 40
     beta = .5
-    net = ActorNet()
+    inv_temp = .3  # lambda
+    net = ActorNet().to(device)
+    optim = optim.Adam(net.parameters(), lr=.01)
 
     for i in range(K):
         # Sample a pair of training MDPs
         Mx, My = random.sample(training_MDPs, 2)
-
         data = generate_expert_trajectories(Mx, My, 1_000)
-
-        train(data, net)
+        errors = train(data, net, optim)
+        print(f"Epoch {i}. Loss: {np.mean(errors):.3f}")
