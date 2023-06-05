@@ -29,7 +29,7 @@ class ContrastiveDataset(Dataset):
         return self.statesX[index], self.actionsX[index], self.statesY[index], self.actionsY[index]
 
 
-def generate_expert_trajectories(env1, env2, n_episodes):
+def generate_expert_trajectories(env1, env2, n_episodes, batch_size):
     def generate_episodes(env) -> tuple[np.ndarray, np.ndarray]:
         total_states, total_actions = [], []
         for i in range(n_episodes):
@@ -57,7 +57,7 @@ def generate_expert_trajectories(env1, env2, n_episodes):
 
     data: ContrastiveDataset = ContrastiveDataset(torch.tensor(statesX), torch.tensor(actionsX), torch.tensor(statesY),
                                                   torch.tensor(actionsY))
-    return DataLoader(data, batch_size=64, shuffle=True)
+    return DataLoader(data, batch_size=batch_size, shuffle=True)
 
 
 def psm_tot(x_arr, y_arr, gamma=0.99):
@@ -99,9 +99,10 @@ def train(data, net, optim):
             # calculate psm
             psm = torch.tensor(psm_tot(curr_actionY, curr_actionX)).to(device)
             psm_metric = torch.exp(-psm / beta)
+            loss_tensor = torch.empty(curr_statesY.shape[0])
             # loop over each state x
             for state_idx in range(curr_statesY.shape[0]):
-                # best_match = np.argmin(psm[state_idx])
+                # best_match = np.argmax(psm[state_idx])
                 best_match = torch.argmax(psm_metric[state_idx])
 
                 target_y = curr_statesY[state_idx]
@@ -124,13 +125,19 @@ def train(data, net, optim):
                 sum_term = torch.sum(
                     (1 - psm_metric_negative[:, state_idx]) * torch.exp(inv_temp * negative_sim))
 
-                loss = nominator / (nominator + sum_term)
-                errors.append(loss.item())
-                episode_errs.append(loss.item())
-                optim.zero_grad()
-                loss.backward()
-                optim.step()
-            print(f"Loss: {np.mean(errors):.4f} Loss episode: {np.mean(episode_errs):.4f}")
+                loss = -torch.log(nominator / (nominator + sum_term))
+                loss_tensor[state_idx] = loss
+                # errors.append(loss.item())
+                # episode_errs.append(loss.item())
+                # optim.zero_grad()
+                # loss.backward()
+                # optim.step()
+            total_loss = torch.mean(loss_tensor)
+            optim.zero_grad()
+            total_loss.backward()
+            optim.step()
+            print(f"Loss episode: {total_loss.item():.4f}")
+            errors.append(total_loss.item())
     return errors
 
 
@@ -149,10 +156,10 @@ if __name__ == '__main__':
     inv_temp = .3  # lambda
     net = ActorNet().to(device)
     optim = optim.Adam(net.parameters(), lr=.01)
-
+    total_errors = []
     for i in range(K):
         # Sample a pair of training MDPs
         Mx, My = random.sample(training_MDPs, 2)
-        data = generate_expert_trajectories(Mx, My, 1_000)
+        data = generate_expert_trajectories(Mx, My, n_episodes=512, batch_size=32)
         errors = train(data, net, optim)
         print(f"Epoch {i}. Loss: {np.mean(errors):.3f}")
