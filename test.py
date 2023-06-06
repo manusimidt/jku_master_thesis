@@ -1,4 +1,9 @@
 """
+This script is just for validating that my translation from tensorflow in pytorch was correct
+"""
+
+
+"""
 Tensorflow code from the paper:
 
 import numpy as np

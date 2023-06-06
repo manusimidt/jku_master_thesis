@@ -86,12 +86,6 @@ if __name__ == '__main__':
         total_errors.append(error)
     end = time.time()
     print(f"Elapsed time {end - start}")
-    xpoints = np.arange(len(total_errors))
-    ypoints = np.array(total_errors)
-
-    plt.plot(xpoints, ypoints)
-    plt.title("Loss over training iterations")
-    plt.show()
 
     state = {
         'state_dict': net.state_dict(),
@@ -99,3 +93,9 @@ if __name__ == '__main__':
         'info': {'conf': configurations}
     }
     torch.save(state, 'ckpts/loss_my_psm_fb_yx.pth')
+    xpoints = np.arange(len(total_errors))
+    ypoints = np.array(total_errors)
+
+    plt.plot(xpoints, ypoints)
+    plt.title("Loss over training iterations")
+    plt.show()

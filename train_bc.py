@@ -103,58 +103,55 @@ def evaluate(net: ActorNet, dataLoader: DataLoader, loss_actor):
         X, y = batch[0].to(device), batch[1].to(device)
         target_actions = y[:, 0]
         pred_action_logits = net.forward(X, contrastive=False)
-
         actor_errors.append(loss_actor(pred_action_logits, target_actions.to(torch.int64)).item())
 
     return actor_errors
 
 
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-print("Training on ", device)
+if __name__ == '__main__':
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    print("Training on ", device)
 
-lr = 0.001
-n_episodes = 5_000
-n_epochs = 8
+    lr = 0.001
+    n_episodes = 5_000
+    n_epochs = 8
 
-environment = 'vanilla_env'
-base_model = './ckpts/loss_my_psm_fb_yx.pth'
+    environment = 'vanilla_env'
+    base_model = './ckpts/loss_my_psm_fb_yx.pth'
 
+    model = ActorNet().to(device)
+    if len(base_model) > 0:
+        print("Loading model ", base_model)
+        ckp = torch.load(base_model, map_location=device)
+        conf = ckp['info']['conf']
 
-model = ActorNet().to(device)
-if len(base_model) > 0:
-    print("Loading model ", base_model)
-    ckp = torch.load(base_model, map_location=device)
-    conf = ckp['info']['conf']
+        model.load_state_dict(ckp['state_dict'])
+        model.disable_embedding_weights()
+        optim_actor = optim.Adam(model.parameters(), lr=lr)
 
-    model.load_state_dict(ckp['state_dict'])
-    model.disable_embedding_weights()
-    optim_actor = optim.Adam(model.parameters(), lr=lr)
+    else:
+        print("Training BC model without any contrastive learning")
+        optim_actor = optim.Adam(model.parameters(), lr=lr)
+        base_model = './ckpts/pure_bc_without_pse-narrow_grid.pth'
+        conf = TRAIN_CONFIGURATIONS['narrow_grid']
 
-else:
-    print("Training BC model without any contrastive learning")
-    optim_actor = optim.Adam(model.parameters(), lr=lr)
-    base_model = './ckpts/without_contrastive.pth'
-    conf = TRAIN_CONFIGURATIONS['narrow_grid']
+    env = VanillaEnv(configurations=list(conf))
 
-env = VanillaEnv(configurations=list(conf))
+    print(f"Generating {n_episodes} expert episodes...")
+    train_loader, test_loader = generate_expert_trajectories(env, n_episodes)
 
-print(f"Generating {n_episodes} expert episodes...")
-trainloader, testloader = generate_expert_trajectories(env, n_episodes)
+    loss_actor = nn.CrossEntropyLoss()
 
-loss_actor = nn.CrossEntropyLoss()
+    for epoch in range(n_epochs):
+        actor_errors = train(model, train_loader, optim_actor, loss_actor)
+        val_actor_errors = evaluate(model, test_loader, loss_actor)
 
-for epoch in range(n_epochs):
-    actor_errors = train(model, trainloader, optim_actor, loss_actor)
-    val_actor_errors = evaluate(model, testloader, loss_actor)
+        print(
+            f"""Epoch {epoch} Train errors: Actor {np.mean(actor_errors):.8f}, Val errors: Actor {np.mean(val_actor_errors):.8f} """)
 
-    print(
-        f"""Epoch {epoch} Train errors: Actor {np.mean(actor_errors):.8f}, Val errors: Actor {np.mean(val_actor_errors):.8f} """)
-
-state = {
-    'state_dict': model.state_dict(),
-    'optimizer': optim_actor.state_dict(),
-    'info': {'conf': conf}
-}
-torch.save(state, base_model.replace('.pth', '-bc.pth'))
-
-
+    state = {
+        'state_dict': model.state_dict(),
+        'optimizer': optim_actor.state_dict(),
+        'info': {'conf': conf}
+    }
+    torch.save(state, base_model.replace('.pth', '-bc.pth'))
