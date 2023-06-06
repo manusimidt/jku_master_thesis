@@ -24,6 +24,7 @@ TRAIN_CONFIGURATIONS = {
     }
 }
 
+
 class VanillaEnv(gym.Env):
     metadata = {"render.modes": ["human"]}
     min_obstacle_pos = 14
@@ -70,6 +71,25 @@ class VanillaEnv(gym.Env):
 
     def close(self):
         self.actualEnv.close()
+
+
+def generate_expert_trajectory(env):
+    states, actions = [], []
+    done = False
+    obs = env.reset()
+    obstacle_position = env.actualEnv.obstacle_position
+    jumping_pixel = obstacle_position - 14
+    step = 0
+    while not done:
+        action = 1 if step == jumping_pixel else 0
+        next_obs, reward, done, info = env.step(action)
+        assert bool(info['collision']) is False, "Trajectory not optimal!"
+        states.append(obs)
+        actions.append(action)
+        obs = next_obs
+        env.render()
+        step += 1
+    return np.array(states), np.array(actions)
 
 
 if __name__ == '__main__':

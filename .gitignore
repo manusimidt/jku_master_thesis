@@ -6,7 +6,7 @@ __pycache__/
 # C extensions
 *.so
 
-/dataset
+/crafter/dataset
 /ckpts
 /ckpts-final
 /best-ckpts

@@ -1,5 +1,6 @@
 import torch.nn as nn
 
+
 # TODO network architecutre is way to big (seep page 20 of the paper)
 # conv1: filter: 8x8 stride:4 32x14x14
 # conv2: filter: 4x4 stride:2 64x6x6
@@ -16,7 +17,7 @@ class ActorNet(nn.Module):
             nn.Conv2d(in_channels=32, out_channels=64, kernel_size=4, stride=2),  # 64x6x6
             nn.ReLU(),
             nn.Conv2d(in_channels=64, out_channels=64, kernel_size=3, stride=1),  # 64x4x4
-            nn.Flatten(),  
+            nn.Flatten(),
             nn.ReLU(),
             nn.Linear(1024, 256),
             nn.ReLU(),
@@ -29,8 +30,14 @@ class ActorNet(nn.Module):
 
         # The downstream task (the actual actor)
         self.d = nn.Sequential(
-            nn.Linear(256, 17),
+            nn.Linear(256, 2),
         )
+
+    def disable_embedding_weights(self):
+        for p in self.f.parameters():
+            p.requires_grad = False
+        for p in self.g.parameters():
+            p.requires_grad = False
 
     def forward(self, x, contrastive: bool):
         h = self.f(x)
