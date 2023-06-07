@@ -1,5 +1,7 @@
 import numpy as np
-from env import VanillaEnv, TRAIN_CONFIGURATIONS
+
+from common import set_seed
+from env import VanillaEnv, TRAIN_CONFIGURATIONS, BCDataset
 from policy import ActorNet
 from rl.common.buffer2 import Transition, Episode
 import torch
@@ -8,20 +10,6 @@ import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
 from typing import List
 from rl.ppo.ppo import PPO
-
-
-class BCDataset(Dataset):
-    def __init__(self, x, y):
-        super().__init__()
-        assert x.shape[0] == y.shape[0]
-        self.x = x
-        self.y = y
-
-    def __len__(self):
-        return self.y.shape[0]
-
-    def __getitem__(self, index):
-        return self.x[index], self.y[index]
 
 
 def generate_expert_trajectories(env, n_episodes):
@@ -109,15 +97,17 @@ def evaluate(net: ActorNet, dataLoader: DataLoader, loss_actor):
 
 
 if __name__ == '__main__':
+    seed = 31
+    set_seed(seed, env=None)
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print("Training on ", device)
 
     lr = 0.001
-    n_episodes = 5_000
-    n_epochs = 8
+    n_episodes = 10_000
+    n_epochs = 20
 
     environment = 'vanilla_env'
-    base_model = './ckpts/loss_wide_paper_psm_fb_yx.pth'
+    base_model = './ckpts/Jun07_21-44-27_Manu-Desktop.pth'
 
     model = ActorNet().to(device)
     if len(base_model) > 0:

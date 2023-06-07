@@ -4,8 +4,11 @@ This module holds different modified jumping tasks environments
 
 import gym
 import numpy as np
+import torch
 from gym import spaces
 from typing import List
+
+from torch.utils.data import Dataset, DataLoader
 
 from gym_jumping_task.envs import JumpTaskEnv
 
@@ -73,6 +76,20 @@ class VanillaEnv(gym.Env):
         self.actualEnv.close()
 
 
+class BCDataset(Dataset):
+    def __init__(self, x, y):
+        super().__init__()
+        assert x.shape[0] == y.shape[0]
+        self.x = x
+        self.y = y
+
+    def __len__(self):
+        return self.y.shape[0]
+
+    def __getitem__(self, index):
+        return self.x[index], self.y[index]
+
+
 def generate_expert_trajectory(env):
     states, actions = [], []
     done = False
@@ -90,6 +107,28 @@ def generate_expert_trajectory(env):
         env.render()
         step += 1
     return np.array(states), np.array(actions)
+
+
+def generate_bc_dataset(envs, batch_size, batch_count):
+    """
+    :param envs: the envs from which to create the dataset
+    :param batch_size: size of each mini batch
+    :param batch_count: how many batches the dataloader should contain
+    """
+    total_states, total_actions = [], []
+    while len(total_states) < batch_size * batch_count:
+        states, actions = generate_expert_trajectory(env)
+        total_states += states
+        total_actions += actions
+    total_states = total_states[0:batch_size * batch_count + 1]
+    total_actions = total_actions[0:batch_size * batch_count + 1]
+
+    total_states, total_actions = np.array(total_states), np.array(total_actions)
+
+    data: BCDataset = BCDataset(torch.tensor(total_states), torch.tensor(total_actions))
+
+    trainloader: DataLoader = DataLoader(data, batch_size=batch_size, shuffle=True)
+    return trainloader
 
 
 if __name__ == '__main__':

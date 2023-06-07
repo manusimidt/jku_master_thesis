@@ -28,11 +28,7 @@ def _metric_fixed_point_fast(cost_matrix, gamma, eps=1e-7):
 
 
 def _calculate_action_cost_matrix(actions_1, actions_2):
-    actions_1 = torch.tensor(actions_1)  # Assuming actions_1 is a NumPy array or a tensor
-    actions_2 = torch.tensor(actions_2)  # Assuming actions_2 is a NumPy array or a tensor
-
-    action_equality = torch.eq(
-        actions_1.unsqueeze(1), actions_2.unsqueeze(0))
+    action_equality = torch.eq(actions_1.unsqueeze(1), actions_2.unsqueeze(0))
     return 1.0 - action_equality.float()
 
 

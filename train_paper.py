@@ -1,10 +1,13 @@
 import random
 import torch
 import time
+import torch.nn as nn
 
 import torch.optim as optim
-
+from torch.utils.tensorboard import SummaryWriter
+import torch.nn.functional as F
 import psm
+from common import dict2mdtable, set_seed
 from env import VanillaEnv, TRAIN_CONFIGURATIONS, generate_expert_trajectory
 
 from policy import ActorNet
@@ -54,7 +57,7 @@ def cosine_similarity(a, b, eps=1e-8):
 
 
 @torch.enable_grad()
-def train(Mx: VanillaEnv, My: VanillaEnv, net, optim) -> float:
+def train(Mx: VanillaEnv, My: VanillaEnv, net, optim, alpha, beta, inv_temp, psm_func, loss_bc):
     device = next(net.parameters()).device
     net.train()
 
@@ -68,51 +71,71 @@ def train(Mx: VanillaEnv, My: VanillaEnv, net, optim) -> float:
     embedding_2 = net.forward(statesY, contrastive=True)  # z_theta(y)
     similarity_matrix = cosine_similarity(embedding_1, embedding_2)
 
-    metric_values = torch.tensor(psm.psm_paper(actionsX, actionsY)).to(device)  # maybe actionsY, actionsX must be switched! (Nope, does not work better)
-    loss = contrastive_loss(similarity_matrix, metric_values, temperature)
+    metric_values = torch.tensor(psm_func(actionsX, actionsY)).to(device)
+    alignment_loss = contrastive_loss(similarity_matrix, metric_values, inv_temp, beta)
+
+    states_y_logits = net.forward(statesY, contrastive=False)
+    actionsY = actionsY.to(device).to(torch.int64)
+    # todo in the paper they have use other data for training bc (256 x 60 x 60 x 2) They probably do this because
+    #  they have a function that up-samples the training examples where the action has to jump
+    cross_entropy_loss = loss_bc(states_y_logits, actionsY)
+
+    total_loss = alpha * alignment_loss + cross_entropy_loss
 
     optim.zero_grad()
-    loss.backward()
+    total_loss.backward()
     optim.step()
-    return loss.item()
+    return total_loss.item(), alignment_loss.item(), cross_entropy_loss.item()
 
 
 if __name__ == '__main__':
-    import matplotlib.pyplot as plt
-    import numpy as np
-
+    seed = 31
+    set_seed(seed, env=None)
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print("Training on ", device)
 
-    configurations = TRAIN_CONFIGURATIONS['wide_grid']
+    hyperparams = {
+        "K": 50_000,
+        "lr": 0.0026,
+        "alpha": 1,  # alignment loss scaling
+        "beta": 1.0,  # PSM scaling
+        "lambda": 1.0,  # inverse temperature
+        "psm": "paper",
+        "conf": "narrow_grid",
+        "script": "train_paper.py"
+    }
+
+    psm_functions = {"fb": psm.psm_fb, "paper": psm.psm_paper}
+    psm_func = psm_functions[hyperparams["psm"]]
+    configurations = TRAIN_CONFIGURATIONS[hyperparams["conf"]]
     training_MDPs = []
     for conf in configurations:
         training_MDPs.append(VanillaEnv([conf]))
-    K = 30_000
-    beta = 0.01
-    temperature = 0.5
-    learning_rate = 0.0026
+
     net = ActorNet().to(device)
 
-    optim = optim.Adam(net.parameters(), lr=learning_rate)
-    total_errors = []
+    optim = optim.Adam(net.parameters(), lr=hyperparams['lr'])
+    loss_bc = nn.CrossEntropyLoss()
     start = time.time()
-    for i in range(K):
+    tb = SummaryWriter()
+    tb.add_text('info/args', dict2mdtable(hyperparams))
+
+    for i in range(hyperparams['K']):
         # Sample a pair of training MDPs
         Mx, My = random.sample(training_MDPs, 2)
-        error = train(Mx, My, net, optim)
-        print(f"Iteration {i}. Loss: {error:.3f} convX:{Mx.configurations}, convY:{My.configurations}")
-        total_errors.append(error)
-    end = time.time()
-    print(f"Elapsed time {end - start}")
+        info = train(Mx, My, net, optim, hyperparams['alpha'], hyperparams['beta'], hyperparams['lambda'], psm_func,
+                     loss_bc)
+
+        total_err, contrastive_err, cross_entropy_err = info
+        print(f"Iteration {i}. Loss: {total_err:.3f}")
+
+        tb.add_scalar("loss/total", total_err, i)
+        tb.add_scalar("loss/contrastive", contrastive_err, i)
+        tb.add_scalar("loss/bc", cross_entropy_err, i)
 
     state = {
         'state_dict': net.state_dict(),
         'optimizer': optim.state_dict(),
         'info': {'conf': configurations}
     }
-    torch.save(state, 'ckpts/train_paper-wide_grid-xy.pth')
-
-    plt.plot(np.arange(len(total_errors)), np.array(total_errors))
-    plt.title("Loss over training iterations")
-    plt.show()
+    torch.save(state, 'ckpts/' + tb.log_dir.split('\\')[-1] + ".pth")

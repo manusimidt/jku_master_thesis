@@ -2,7 +2,11 @@ import random
 import torch
 import time
 
+import torch.nn as nn
 import torch.optim as optim
+from torch.utils.tensorboard import SummaryWriter
+
+from common import dict2mdtable, set_seed
 from env import VanillaEnv, TRAIN_CONFIGURATIONS, generate_expert_trajectory
 
 from policy import ActorNet
@@ -11,7 +15,7 @@ import psm
 
 
 @torch.enable_grad()
-def train(Mx: VanillaEnv, My: VanillaEnv, net, optim) -> float:
+def train(Mx: VanillaEnv, My: VanillaEnv, net, optim, alpha, beta, inv_temp, psm_func, loss_bc):
     device = next(net.parameters()).device
     net.train()
 
@@ -22,13 +26,15 @@ def train(Mx: VanillaEnv, My: VanillaEnv, net, optim) -> float:
     statesY, actionsY = torch.tensor(statesY).to(device), torch.tensor(actionsY)
 
     # calculate psm
-    psm_metric = torch.tensor(psm.psm_fb(actionsX, actionsY)).to(device)
+    psm_metric = torch.tensor(psm_func(actionsX, actionsY)).to(device)
     psm_metric = torch.exp(-psm_metric / beta)
     loss = 0
+    avg_pos_sim, avg_neg_sim = 0, 0
     # loop over each state x
     for state_idx in range(statesY.shape[0]):
         # best_match = np.argmax(psm[state_idx])
-        best_match = torch.argmax(psm_metric[:,state_idx])
+        current_psm_values = psm_metric[:, state_idx]
+        best_match = torch.argmax(current_psm_values)
 
         target_y = statesY[state_idx]  # this is y
         positive_x = statesX[best_match]  # this is x_y
@@ -41,61 +47,86 @@ def train(Mx: VanillaEnv, My: VanillaEnv, net, optim) -> float:
 
         # this is s_\theta(x_y, y)
         positive_sim = F.cosine_similarity(positive_x_logits, target_logits, dim=0)
-        nominator = psm_metric[best_match, state_idx] * torch.exp(inv_temp * positive_sim)
+        avg_pos_sim += positive_sim
+        nominator = current_psm_values[best_match] * torch.exp(inv_temp * positive_sim)
 
         # s_\theta(x', y)
         negative_sim = F.cosine_similarity(negative_x_logits, target_logits, dim=1)
-        psm_metric_negative = torch.cat((psm_metric[:best_match], psm_metric[best_match + 1:]), dim=0)
-
+        avg_neg_sim += torch.mean(negative_sim)
+        psm_metric_negative = torch.cat((current_psm_values[:best_match], current_psm_values[best_match + 1:]), dim=0)
         sum_term = torch.sum(
-            (1 - psm_metric_negative[:, state_idx]) * torch.exp(inv_temp * negative_sim))
+            (1 - psm_metric_negative) * torch.exp(inv_temp * negative_sim))
 
         loss += -torch.log(nominator / (nominator + sum_term))
 
-    total_loss = loss / statesY.shape[0]
+    contrastive_loss = (loss / statesY.shape[0])
+
+    # Add BC loss
+    states_y_logits = net.forward(statesY, contrastive=False)
+    cross_entropy_loss = loss_bc(states_y_logits, actionsY.to(device).to(torch.int64))
+
+    total_loss = alpha * contrastive_loss + cross_entropy_loss
     optim.zero_grad()
     total_loss.backward()
     optim.step()
-    return total_loss.item()
+    avg_pos_sim = (avg_pos_sim / statesY.shape[0]).item()
+    avg_neg_sim = (avg_neg_sim / statesY.shape[0]).item()
+    return total_loss.item(), contrastive_loss.item(), cross_entropy_loss.item(), avg_pos_sim, avg_neg_sim
 
 
 if __name__ == '__main__':
-    import matplotlib.pyplot as plt
-    import numpy as np
-
+    seed = 31
+    set_seed(seed, env=None)
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print("Training on ", device)
 
-    configurations = TRAIN_CONFIGURATIONS['narrow_grid']
+    hyperparams = {
+        "K": 5000,
+        "lr": 0.0026,
+        "alpha": 1,  # alignment loss scaling
+        "beta": 1.0,  # PSM scaling
+        "lambda": 1.0,  # inverse temperature
+        "batch_size": 256,  # batch size for imitation learning
+        "psm": "paper",
+        "conf": "narrow_grid",
+        "script": "train.py"
+    }
+
+    configurations = TRAIN_CONFIGURATIONS[hyperparams["conf"]]
     training_MDPs = []
     for conf in configurations:
         training_MDPs.append(VanillaEnv([conf]))
-    K = 5000
-    beta = 0.1
-    inv_temp = 1 / 0.1  # lambda
+
+    psm_functions = {"fb": psm.psm_fb, "paper": psm.psm_paper}
+    psm_func = psm_functions[hyperparams["psm"]]
     net = ActorNet().to(device)
 
-    optim = optim.Adam(net.parameters(), lr=.001)
-    total_errors = []
-    start = time.time()
-    for i in range(K):
+    optim = optim.Adam(net.parameters(), lr=hyperparams['lr'])
+    loss_bc = nn.CrossEntropyLoss()
+
+    tb = SummaryWriter()
+    tb.add_text('info/args', dict2mdtable(hyperparams))
+
+    for i in range(hyperparams['K']):
         # Sample a pair of training MDPs
         Mx, My = random.sample(training_MDPs, 2)
-        error = train(Mx, My, net, optim)
-        print(f"Iteration {i}. Loss: {error:.3f} convX:{Mx.configurations}, convY:{My.configurations}")
-        total_errors.append(error)
-    end = time.time()
-    print(f"Elapsed time {end - start}")
+        # todo only for debugging!
+        # Mx, My = training_MDPs[0], training_MDPs[1]
+        info = train(Mx, My, net, optim, hyperparams['alpha'], hyperparams['beta'], hyperparams['lambda'], psm_func,
+                     loss_bc)
+
+        total_err, contrastive_err, cross_entropy_err, avg_pos_sim, avg_neg_sim = info
+        print(f"Iteration {i}. Loss: {total_err:2.3f}")
+
+        tb.add_scalar("loss/total", total_err, i)
+        tb.add_scalar("loss/contrastive", contrastive_err, i)
+        tb.add_scalar("loss/bc", cross_entropy_err, i)
+        tb.add_scalar("debug/positive_similarity", avg_pos_sim, i)
+        tb.add_scalar("debug/negative_similarity", avg_neg_sim, i)
 
     state = {
         'state_dict': net.state_dict(),
         'optimizer': optim.state_dict(),
         'info': {'conf': configurations}
     }
-    torch.save(state, 'ckpts/loss_my_psm_fb_yx.pth')
-    xpoints = np.arange(len(total_errors))
-    ypoints = np.array(total_errors)
-
-    plt.plot(xpoints, ypoints)
-    plt.title("Loss over training iterations")
-    plt.show()
+    torch.save(state, 'ckpts/' + tb.log_dir.split('\\')[-1] + ".pth")
