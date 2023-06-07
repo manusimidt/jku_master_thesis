@@ -68,7 +68,7 @@ def train(Mx: VanillaEnv, My: VanillaEnv, net, optim) -> float:
     embedding_2 = net.forward(statesY, contrastive=True)  # z_theta(y)
     similarity_matrix = cosine_similarity(embedding_1, embedding_2)
 
-    metric_values = torch.tensor(psm.psm_paper(actionsY, actionsX)).to(device)  # maybe actionsY, actionsX must be switched! (Nope, does not work better)
+    metric_values = torch.tensor(psm.psm_paper(actionsX, actionsY)).to(device)  # maybe actionsY, actionsX must be switched! (Nope, does not work better)
     loss = contrastive_loss(similarity_matrix, metric_values, temperature)
 
     optim.zero_grad()

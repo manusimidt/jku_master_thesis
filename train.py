@@ -22,13 +22,13 @@ def train(Mx: VanillaEnv, My: VanillaEnv, net, optim) -> float:
     statesY, actionsY = torch.tensor(statesY).to(device), torch.tensor(actionsY)
 
     # calculate psm
-    psm_metric = torch.tensor(psm.psm_fb(actionsY, actionsX)).to(device)
+    psm_metric = torch.tensor(psm.psm_fb(actionsX, actionsY)).to(device)
     psm_metric = torch.exp(-psm_metric / beta)
     loss = 0
     # loop over each state x
     for state_idx in range(statesY.shape[0]):
         # best_match = np.argmax(psm[state_idx])
-        best_match = torch.argmax(psm_metric[state_idx])
+        best_match = torch.argmax(psm_metric[:,state_idx])
 
         target_y = statesY[state_idx]  # this is y
         positive_x = statesX[best_match]  # this is x_y
@@ -36,12 +36,12 @@ def train(Mx: VanillaEnv, My: VanillaEnv, net, optim) -> float:
 
         # pass the positive pairs through the network
         # z_\theta(x_y), z_\theta(y)
-        positive_x_logits, target_logits = net.forward(torch.stack((target_y, positive_x)), contrastive=True)
+        positive_x_logits, target_logits = net.forward(torch.stack((positive_x, target_y)), contrastive=True)
         negative_x_logits = net.forward(negative_x, contrastive=True)  # z_\theta(x')
 
         # this is s_\theta(x_y, y)
         positive_sim = F.cosine_similarity(positive_x_logits, target_logits, dim=0)
-        nominator = psm_metric[state_idx, best_match] * torch.exp(inv_temp * positive_sim)
+        nominator = psm_metric[best_match, state_idx] * torch.exp(inv_temp * positive_sim)
 
         # s_\theta(x', y)
         negative_sim = F.cosine_similarity(negative_x_logits, target_logits, dim=1)

@@ -3,6 +3,7 @@ Provides different PSMs
 """
 
 import numpy as np
+import torch
 
 
 def _metric_fixed_point_fast(cost_matrix, gamma, eps=1e-7):
@@ -26,11 +27,18 @@ def _metric_fixed_point_fast(cost_matrix, gamma, eps=1e-7):
     return d
 
 
+def _calculate_action_cost_matrix(actions_1, actions_2):
+    actions_1 = torch.tensor(actions_1)  # Assuming actions_1 is a NumPy array or a tensor
+    actions_2 = torch.tensor(actions_2)  # Assuming actions_2 is a NumPy array or a tensor
+
+    action_equality = torch.eq(
+        actions_1.unsqueeze(1), actions_2.unsqueeze(0))
+    return 1.0 - action_equality.float()
+
+
 def psm_paper(actions1, actions2, gamma=0.99):
     """Taken from Agarwal et.al"""
-    actions1, actions2 = np.array(actions1, ndmin=2).T, np.array(actions2, ndmin=2).T
-    diff = np.expand_dims(actions1, axis=1) - np.expand_dims(actions2, axis=0)
-    action_cost = np.mean(np.abs(diff), axis=-1).astype(np.float32)
+    action_cost = _calculate_action_cost_matrix(actions1, actions2)
     return _metric_fixed_point_fast(np.array(action_cost), gamma=gamma)
 
 

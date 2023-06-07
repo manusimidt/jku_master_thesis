@@ -10,6 +10,7 @@ __pycache__/
 /ckpts
 /ckpts-final
 /best-ckpts
+/runs
 
 # Distribution / packaging
 .Python

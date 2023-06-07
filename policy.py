@@ -25,7 +25,7 @@ class ActorNet(nn.Module):
 
         # projection head (for the contrastive loss)
         self.g = nn.Sequential(
-            nn.Linear(256, 50),
+            nn.Linear(256, 64),
         )
 
         # The downstream task (the actual actor)
@@ -44,4 +44,5 @@ class ActorNet(nn.Module):
         if contrastive:
             return self.g(h)
         else:
-            return self.d(h)
+            # Stop gradient backpropagation from downstream task layer into embedding
+            return self.d(h.detach())
