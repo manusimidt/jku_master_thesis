@@ -2,7 +2,6 @@
 This script is just for validating that my translation from tensorflow in pytorch was correct
 """
 
-
 """
 Tensorflow code from the paper:
 
@@ -150,11 +149,11 @@ def contrastive_loss(similarity_matrix, metric_values, temperature=1.0, beta=1.0
     return torch.mean(neg_logits1 - pos_logits1)  # Equation 4
 
 
-e1 = np.array([[.7, .54, .345], [.6, .4625, .423], [.9876, .2, .3]])
-e2 = np.array([[.123, .56, .3], [.3, 5.2, .1], [.2763, .928, .786]])
+e1 = np.array([.7, .54, .345, .6, .4625, .423, .9876, .2, .3, .34, .134, 2], np.float64)
+e2 = np.array([.123, .56, .3, .3, 5.2, .1, .2763, .928, .786, .23, .436, 43], np.float64)
 
-a1 = np.array([0, 1, 0])
-a2 = np.array([1, 0, 0])
+a1 = np.array([0, 1, 0, 0])
+a2 = np.array([1, 0, 0, 0])
 
 e1 = torch.tensor(e1)
 e2 = torch.tensor(e2)

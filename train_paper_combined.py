@@ -1,6 +1,7 @@
 import random
 import torch
 import time
+import torch.nn as nn
 
 import torch.optim as optim
 
@@ -54,7 +55,7 @@ def cosine_similarity(a, b, eps=1e-8):
 
 
 @torch.enable_grad()
-def train(Mx: VanillaEnv, My: VanillaEnv, net, optim) -> float:
+def train(Mx: VanillaEnv, My: VanillaEnv, net, optim, alpha, loss_bc) -> float:
     device = next(net.parameters()).device
     net.train()
 
@@ -69,7 +70,11 @@ def train(Mx: VanillaEnv, My: VanillaEnv, net, optim) -> float:
     similarity_matrix = cosine_similarity(embedding_1, embedding_2)
 
     metric_values = torch.tensor(psm.psm_paper(actionsY, actionsX)).to(device)  # maybe actionsY, actionsX must be switched! (Nope, does not work better)
-    loss = contrastive_loss(similarity_matrix, metric_values, temperature)
+    loss = alpha * contrastive_loss(similarity_matrix, metric_values, temperature)
+
+    states_y_logits = net.forward(statesY, contrastive=False)
+    actionsY = actionsY.to(device).to(torch.int64)
+    loss += loss_bc(states_y_logits, actionsY)
 
     optim.zero_grad()
     loss.backward()
@@ -90,17 +95,19 @@ if __name__ == '__main__':
         training_MDPs.append(VanillaEnv([conf]))
     K = 30_000
     beta = 0.01
+    alpha = 5
     temperature = 0.5
     learning_rate = 0.0026
     net = ActorNet().to(device)
 
     optim = optim.Adam(net.parameters(), lr=learning_rate)
+    loss_bc = nn.CrossEntropyLoss()
     total_errors = []
     start = time.time()
     for i in range(K):
         # Sample a pair of training MDPs
         Mx, My = random.sample(training_MDPs, 2)
-        error = train(Mx, My, net, optim)
+        error = train(Mx, My, net, optim, alpha, loss_bc)
         print(f"Iteration {i}. Loss: {error:.3f} convX:{Mx.configurations}, convY:{My.configurations}")
         total_errors.append(error)
     end = time.time()
@@ -111,7 +118,7 @@ if __name__ == '__main__':
         'optimizer': optim.state_dict(),
         'info': {'conf': configurations}
     }
-    torch.save(state, 'ckpts/train_paper-wide_grid-xy.pth')
+    torch.save(state, 'ckpts/train_combined_narrow_grid-xy-bc.pth')
 
     plt.plot(np.arange(len(total_errors)), np.array(total_errors))
     plt.title("Loss over training iterations")

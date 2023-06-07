@@ -117,7 +117,7 @@ if __name__ == '__main__':
     n_epochs = 8
 
     environment = 'vanilla_env'
-    base_model = './ckpts/loss_my_psm_fb_yx.pth'
+    base_model = './ckpts/loss_wide_paper_psm_fb_yx.pth'
 
     model = ActorNet().to(device)
     if len(base_model) > 0:
