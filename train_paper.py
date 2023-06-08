@@ -102,13 +102,13 @@ if __name__ == '__main__':
     print("Training on ", device)
 
     hyperparams = {
-        "K": 6500,
+        "K": 80_000,
         "lr": 0.0026,
-        "alpha": 1,  # alignment loss scaling
-        "beta": 1.0,  # PSM scaling
+        "alpha": .1,  # alignment loss scaling
+        "beta": 0.7,  # PSM scaling
         "lambda": 1.0,  # inverse temperature
         "psm": "paper",
-        "conf": "narrow_grid",
+        "conf": "wide_grid",
         "script": "train_paper.py"
     }
 
@@ -117,7 +117,7 @@ if __name__ == '__main__':
     configurations = TRAIN_CONFIGURATIONS[hyperparams["conf"]]
     training_MDPs = []
     for conf in configurations:
-        training_MDPs.append(VanillaEnv([conf]))
+        training_MDPs.append(env.AugmentingEnv([conf]))
 
     net = ActorNet().to(device)
 
@@ -127,7 +127,7 @@ if __name__ == '__main__':
     tb = SummaryWriter()
     tb.add_text('info/args', dict2mdtable(hyperparams))
 
-    bc_data = env.generate_bc_data(training_MDPs, 4096 * 8, balanced=True)
+    bc_data = env.generate_bc_data(training_MDPs, 4096 * 8, balanced=False)
 
     for i in range(hyperparams['K']):
         # Sample a pair of training MDPs

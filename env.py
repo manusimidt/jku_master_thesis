@@ -10,7 +10,9 @@ from gym import spaces
 from typing import List
 
 from torch.utils.data import Dataset, DataLoader
-
+import torchvision.transforms.functional as fn
+from torchvision.transforms.functional import InterpolationMode
+import augmentations
 from gym_jumping_task.envs import JumpTaskEnv
 
 TRAIN_CONFIGURATIONS = {
@@ -28,6 +30,22 @@ TRAIN_CONFIGURATIONS = {
     }
 }
 
+POSSIBLE_AUGMENTATIONS = [
+    {'name': 'trans64', 'func': augmentations.random_translate, 'params': {'size': 64}},
+    {'name': 'trans68', 'func': augmentations.random_translate, 'params': {'size': 68}},
+    {'name': 'trans72', 'func': augmentations.random_translate, 'params': {'size': 72}},
+    {'name': 'crop59', 'func': augmentations.random_crop, 'params': {'out': 59}},
+    {'name': 'crop58', 'func': augmentations.random_crop, 'params': {'out': 58}},
+    {'name': 'crop57', 'func': augmentations.random_crop, 'params': {'out': 57}},
+    {'name': 'cut5', 'func': augmentations.random_cutout, 'params': {'min_cut': 2, 'max_cut': 5}},
+    {'name': 'cut15', 'func': augmentations.random_cutout, 'params': {'min_cut': 5, 'max_cut': 15}},
+    {'name': 'cut20', 'func': augmentations.random_cutout, 'params': {'min_cut': 10, 'max_cut': 20}},
+    {'name': 'blur1', 'func': augmentations.gaussian_blur, 'params': {'sigma': .6}},
+    {'name': 'blur2', 'func': augmentations.gaussian_blur, 'params': {'sigma': 1.2}},
+    {'name': 'noise1', 'func': augmentations.random_noise, 'params': {'strength': .02}},
+    {'name': 'noise2', 'func': augmentations.random_noise, 'params': {'strength': .05}},
+    {'name': 'flip', 'func': augmentations.random_flip, 'params': {}},
+]
 
 class VanillaEnv(gym.Env):
     metadata = {"render.modes": ["human"]}
@@ -76,6 +94,56 @@ class VanillaEnv(gym.Env):
     def close(self):
         self.actualEnv.close()
 
+
+class AugmentingEnv(VanillaEnv):
+    """Custom Environment that follows gym interface."""
+    metadata = {"render.modes": ["human"]}
+
+    def __init__(self, configurations: List[tuple] or None = None, rendering=False):
+        """
+        :param configurations: possible configurations, array of tuples consisting of
+            the obstacle position and the floor height
+        """
+        super().__init__(configurations, rendering)
+        self.current_augmentation = None
+
+    def step(self, action):
+        aug_obs, _, r, done, info = self.step_augmented(action)
+        return aug_obs, r, done, info
+
+    def step_augmented(self, action):
+        # returns both the augmented state and the not augmented state
+        obs, r, done, info = super().step(action)
+        return self._augment(obs), obs, r, done, info
+
+    def reset(self):
+        aug_obs, _ = self.reset_augmented()
+        return aug_obs
+
+    def reset_augmented(self):
+        obs = super().reset()
+        # sample a new augmentation
+        self._sample_augmentation()
+        aug_obs = self._augment(obs)
+        return aug_obs, obs
+
+    def _sample_augmentation(self):
+        idx = np.random.choice(range(len(POSSIBLE_AUGMENTATIONS)))
+        self.current_augmentation = POSSIBLE_AUGMENTATIONS[idx]
+
+    def _augment(self, obs):
+        augmentation = self.current_augmentation
+        # convert the observation in the needed format (B x C x H x W)
+        aug_obs = np.expand_dims(obs, axis=1)
+        # augment the observation
+        aug_obs = augmentation['func'](aug_obs, **augmentation['params'])
+        aug_obs = aug_obs.squeeze(axis=0)
+        # The augmented observation can have a different width and height!!
+        # compensate for that
+        if not obs.shape == aug_obs.shape:
+            aug_obs = fn.resize(torch.from_numpy(aug_obs), size=[60, 60],
+                                interpolation=InterpolationMode.NEAREST).numpy()
+        return aug_obs
 
 class BCDataset(Dataset):
     def __init__(self, x, y):
@@ -158,6 +226,26 @@ def generate_bc_dataset(envs, batch_size, batch_count, balanced=False):
     test_loader: DataLoader = DataLoader(val_set, batch_size=64, shuffle=True)
     return train_loader, test_loader
 
+
+def generate_positive_pairs(envs: [VanillaEnv]):
+    env1, env2 = random.sample(envs, 2)
+    assert len(env1.configurations) == len(env2.configurations) == 1, "Only works with deterministic Vanilla Envs!"
+    obstacle_pos_1 = env1.configurations[0][0]
+    obstacle_pos_2 = env2.configurations[0][0]
+    diff = obstacle_pos_1 - obstacle_pos_2
+
+    if diff > 0: return generate_positive_pairs([env2, env1])
+
+    state1, action1 = generate_expert_episode(env1, numpy=True)
+    state2, action2 = generate_expert_episode(env2, numpy=True)
+
+    state2 = state2[-diff:]
+    state1 = state1[:len(state2)]
+
+    assert len(state1) == len(state2), "Some error in the code above"
+    # sample a random index along the common frames
+    idx = np.random.randint(0, len(state2), size=1)[0]
+    return state1[idx], state2[idx]
 
 if __name__ == '__main__':
 

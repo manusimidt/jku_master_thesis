@@ -84,20 +84,20 @@ if __name__ == '__main__':
     print("Training on ", device)
 
     hyperparams = {
-        "K": 2400,
+        "K": 5_000,
         "lr": 0.0026,
         "alpha": .1,  # alignment loss scaling
         "beta": 1.0,  # PSM scaling
         "lambda": 1.0,  # inverse temperature
-        "psm": "paper",
-        "conf": "narrow_grid",
+        "psm": "fb",
+        "conf": "wide_grid",
         "script": "train.py"
     }
 
     configurations = TRAIN_CONFIGURATIONS[hyperparams["conf"]]
     training_MDPs = []
     for conf in configurations:
-        training_MDPs.append(VanillaEnv([conf]))
+        training_MDPs.append(env.AugmentingEnv([conf]))
 
     psm_functions = {"fb": psm.psm_fb, "paper": psm.psm_paper}
     psm_func = psm_functions[hyperparams["psm"]]

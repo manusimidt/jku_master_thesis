@@ -94,22 +94,3 @@ def psm_fb(x_arr, y_arr, gamma_forward=0.99, gamma_backward=0.99):
     return storage_fwrd + storage_bwrd
 
 
-def calculate_ground_trough(actions_1, actions_2):
-    """
-    This function only works for jumping task env!
-    """
-    diff = np.where(actions_2 == 1)[0][0] - np.where(actions_1 == 1)[0][0]
-    if diff >= 0:
-        temp = actions_1
-        actions_1 = actions_2
-        actions_2 = temp
-        diff = np.where(actions_2 == 1)[0][0] - np.where(actions_1 == 1)[0][0]
-    n, m = len(actions_1), len(actions_2)
-    cost_matrix = torch.ones((n, m), dtype=torch.float32)
-    for i in range(n):
-        j = i + diff
-        if j < m:
-            cost_matrix[i, j] = 0.0
-        else:
-            break
-    return cost_matrix.numpy()
