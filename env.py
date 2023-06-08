@@ -1,6 +1,7 @@
 """
 This module holds different modified jumping tasks environments
 """
+import random
 
 import gym
 import numpy as np
@@ -90,7 +91,8 @@ class BCDataset(Dataset):
         return self.x[index], self.y[index]
 
 
-def generate_expert_trajectory(env):
+def generate_expert_episode(env, numpy=True):
+    """ Generates a single expert trajectory """
     states, actions = [], []
     done = False
     obs = env.reset()
@@ -106,29 +108,55 @@ def generate_expert_trajectory(env):
         obs = next_obs
         env.render()
         step += 1
-    return np.array(states), np.array(actions)
+    if numpy:
+        return np.array(states), np.array(actions)
+    else:
+        return states, actions
 
 
-def generate_bc_dataset(envs, batch_size, batch_count):
+def generate_bc_data(envs, total_size, balanced=False):
     """
+    Generates an array of states and their corresponding optimal action
     :param envs: the envs from which to create the dataset
-    :param batch_size: size of each mini batch
-    :param batch_count: how many batches the dataloader should contain
+    :param total_size: size of the dataset
+    :param balanced: If true the resulting dataset will have 33% jump actions and 66% non-jump actions
     """
     total_states, total_actions = [], []
-    while len(total_states) < batch_size * batch_count:
-        states, actions = generate_expert_trajectory(env)
-        total_states += states
-        total_actions += actions
-    total_states = total_states[0:batch_size * batch_count + 1]
-    total_actions = total_actions[0:batch_size * batch_count + 1]
+    while len(total_states) < total_size:
+        env = random.sample(envs, 1)[0]
+        states, actions = generate_expert_episode(env, numpy=False)
 
-    total_states, total_actions = np.array(total_states), np.array(total_actions)
+        if not balanced:
+            total_states += states
+            total_actions += actions
+        else:
+            # balance the dataset. Always include the state that has the jump action and two non-jumping
+            jump_idx = np.argmax(actions)
+            total_states.append(states[jump_idx])
+            total_actions.append(actions[jump_idx])
+            non_jump_indices = np.random.choice(np.delete(np.arange(0, len(actions)), jump_idx), 2)
+            total_states += [states[non_jump_indices[0]], states[non_jump_indices[1]]]
+            total_actions += [actions[non_jump_indices[0]], actions[non_jump_indices[1]]]
 
-    data: BCDataset = BCDataset(torch.tensor(total_states), torch.tensor(total_actions))
+    total_states = total_states[0:total_size]
+    total_actions = total_actions[0:total_size]
 
-    trainloader: DataLoader = DataLoader(data, batch_size=batch_size, shuffle=True)
-    return trainloader
+    return np.array(total_states), np.array(total_actions)
+
+
+def generate_bc_dataset(envs, batch_size, batch_count, balanced=False):
+    """
+    Generates a dataset of length batch_size * batch_count
+    containing states and their corresponding optimal action
+    """
+    states, actions = generate_bc_data(envs, batch_size * batch_count, balanced)
+    states, actions = torch.tensor(states), torch.tensor(actions)
+    data: BCDataset = BCDataset(states, actions)
+    train_set_length = int(len(data) * 0.8)
+    train_set, val_set = torch.utils.data.random_split(data, [train_set_length, len(data) - train_set_length])
+    train_loader: DataLoader = DataLoader(train_set, batch_size=64, shuffle=True)
+    test_loader: DataLoader = DataLoader(val_set, batch_size=64, shuffle=True)
+    return train_loader, test_loader
 
 
 if __name__ == '__main__':

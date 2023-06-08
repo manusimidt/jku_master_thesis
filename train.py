@@ -6,8 +6,9 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.tensorboard import SummaryWriter
 
+import env
 from common import dict2mdtable, set_seed
-from env import VanillaEnv, TRAIN_CONFIGURATIONS, generate_expert_trajectory
+from env import VanillaEnv, TRAIN_CONFIGURATIONS, generate_expert_episode
 
 from policy import ActorNet
 import torch.nn.functional as F
@@ -15,12 +16,12 @@ import psm
 
 
 @torch.enable_grad()
-def train(Mx: VanillaEnv, My: VanillaEnv, net, optim, alpha, beta, inv_temp, psm_func, loss_bc):
+def train(Mx: VanillaEnv, My: VanillaEnv, net, optim, alpha, beta, inv_temp, psm_func, bc_data, loss_bc):
     device = next(net.parameters()).device
     net.train()
 
-    statesX, actionsX = generate_expert_trajectory(Mx)
-    statesY, actionsY = generate_expert_trajectory(My)
+    statesX, actionsX = generate_expert_episode(Mx)
+    statesY, actionsY = generate_expert_episode(My)
 
     statesX, actionsX = torch.tensor(statesX).to(device), torch.tensor(actionsX)
     statesY, actionsY = torch.tensor(statesY).to(device), torch.tensor(actionsY)
@@ -62,8 +63,10 @@ def train(Mx: VanillaEnv, My: VanillaEnv, net, optim, alpha, beta, inv_temp, psm
     contrastive_loss = (loss / statesY.shape[0])
 
     # Add BC loss
-    states_y_logits = net.forward(statesY, contrastive=False)
-    cross_entropy_loss = loss_bc(states_y_logits, actionsY.to(device).to(torch.int64))
+    idx = random.sample(range(len(bc_data[0])), 256)
+    bc_states, bc_actions = torch.tensor(bc_data[0][idx]).to(device), torch.tensor(bc_data[1][idx]).to(device)
+    states_y_logits = net.forward(bc_states, contrastive=False)
+    cross_entropy_loss = loss_bc(states_y_logits, bc_actions.to(torch.int64))
 
     total_loss = alpha * contrastive_loss + cross_entropy_loss
     optim.zero_grad()
@@ -81,12 +84,11 @@ if __name__ == '__main__':
     print("Training on ", device)
 
     hyperparams = {
-        "K": 5000,
+        "K": 2400,
         "lr": 0.0026,
-        "alpha": 1,  # alignment loss scaling
+        "alpha": .1,  # alignment loss scaling
         "beta": 1.0,  # PSM scaling
         "lambda": 1.0,  # inverse temperature
-        "batch_size": 256,  # batch size for imitation learning
         "psm": "paper",
         "conf": "narrow_grid",
         "script": "train.py"
@@ -107,16 +109,20 @@ if __name__ == '__main__':
     tb = SummaryWriter()
     tb.add_text('info/args', dict2mdtable(hyperparams))
 
+    bc_data = env.generate_bc_data(training_MDPs, 4096 * 4, balanced=True)
+
     for i in range(hyperparams['K']):
         # Sample a pair of training MDPs
         Mx, My = random.sample(training_MDPs, 2)
         # todo only for debugging!
         # Mx, My = training_MDPs[0], training_MDPs[1]
         info = train(Mx, My, net, optim, hyperparams['alpha'], hyperparams['beta'], hyperparams['lambda'], psm_func,
-                     loss_bc)
+                     bc_data, loss_bc)
 
         total_err, contrastive_err, cross_entropy_err, avg_pos_sim, avg_neg_sim = info
         print(f"Iteration {i}. Loss: {total_err:2.3f}")
+
+
 
         tb.add_scalar("loss/total", total_err, i)
         tb.add_scalar("loss/contrastive", contrastive_err, i)

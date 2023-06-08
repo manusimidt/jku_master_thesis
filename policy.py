@@ -39,10 +39,13 @@ class ActorNet(nn.Module):
         for p in self.g.parameters():
             p.requires_grad = False
 
-    def forward(self, x, contrastive: bool):
+    def forward(self, x, contrastive: bool, full_network: bool = False):
         h = self.f(x)
         if contrastive:
             return self.g(h)
         else:
-            # Stop gradient backpropagation from downstream task layer into embedding
-            return self.d(h.detach())
+            if full_network:
+                return self.d(h)
+            else:
+                # Stop gradient backpropagation from downstream task layer into embedding
+                return self.d(h.detach())
