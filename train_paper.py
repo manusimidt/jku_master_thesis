@@ -13,6 +13,7 @@ from common import dict2mdtable, set_seed
 from env import VanillaEnv, TRAIN_CONFIGURATIONS, generate_expert_episode
 
 from policy import ActorNet
+from validate import validate
 
 
 def contrastive_loss(similarity_matrix, metric_values, temperature=1.0, beta=1.0):
@@ -59,7 +60,7 @@ def cosine_similarity(a, b, eps=1e-8):
 
 
 @torch.enable_grad()
-def train(Mx: VanillaEnv, My: VanillaEnv, net, optim, alpha, beta, inv_temp, psm_func, bc_data, loss_bc):
+def train(Mx: VanillaEnv, My: VanillaEnv, net, optim, alpha1, alpha2, beta, inv_temp, psm_func, bc_data, loss_bc):
     device = next(net.parameters()).device
     net.train()
 
@@ -82,12 +83,12 @@ def train(Mx: VanillaEnv, My: VanillaEnv, net, optim, alpha, beta, inv_temp, psm
     # states_y_logits = net.forward(statesY, contrastive=False)
     # actionsY = actionsY.to(device).to(torch.int64)
     # cross_entropy_loss = loss_bc(states_y_logits, actionsY)
-    idx = random.sample(range(len(bc_data[0])), 256)
+    idx = random.sample(range(len(bc_data[0])), 64)
     bc_states, bc_actions = torch.tensor(bc_data[0][idx]).to(device), torch.tensor(bc_data[1][idx]).to(device)
     states_y_logits = net.forward(bc_states, contrastive=False)
     cross_entropy_loss = loss_bc(states_y_logits, bc_actions.to(torch.int64))
 
-    total_loss = alpha * alignment_loss + cross_entropy_loss
+    total_loss = alpha1 * alignment_loss + alpha2 * cross_entropy_loss
 
     optim.zero_grad()
     total_loss.backward()
@@ -102,17 +103,18 @@ if __name__ == '__main__':
     print("Training on ", device)
 
     hyperparams = {
-        "K": 80_000,
+        "K": 50_000,
         "lr": 0.0026,
-        "alpha": .1,  # alignment loss scaling
+        "alpha1": 5,  # alignment loss scaling
+        "alpha2": .5,  # BC loss scaling
         "beta": 0.7,  # PSM scaling
         "lambda": 1.0,  # inverse temperature
-        "psm": "paper",
+        "psm": "fb",
         "conf": "wide_grid",
         "script": "train_paper.py"
     }
 
-    psm_functions = {"fb": psm.psm_fb, "paper": psm.psm_paper}
+    psm_functions = {"f": psm.psm_f_fast, "fb": psm.psm_fb_fast}
     psm_func = psm_functions[hyperparams["psm"]]
     configurations = TRAIN_CONFIGURATIONS[hyperparams["conf"]]
     training_MDPs = []
@@ -132,7 +134,7 @@ if __name__ == '__main__':
     for i in range(hyperparams['K']):
         # Sample a pair of training MDPs
         Mx, My = random.sample(training_MDPs, 2)
-        info = train(Mx, My, net, optim, hyperparams['alpha'], hyperparams['beta'], hyperparams['lambda'], psm_func,
+        info = train(Mx, My, net, optim, hyperparams['alpha1'], hyperparams['alpha2'], hyperparams['beta'], hyperparams['lambda'], psm_func,
                      bc_data, loss_bc)
 
         total_err, contrastive_err, cross_entropy_err = info
@@ -141,6 +143,11 @@ if __name__ == '__main__':
         tb.add_scalar("loss/total", total_err, i)
         tb.add_scalar("loss/contrastive", contrastive_err, i)
         tb.add_scalar("loss/bc", cross_entropy_err, i)
+
+        if i % 1000 == 0:
+            fig, perf = validate(net, device, configurations)
+            tb.add_scalar("val/generalization", perf, i)
+            tb.add_image("val/fig", fig, i, dataformats="HWC")
 
     state = {
         'state_dict': net.state_dict(),

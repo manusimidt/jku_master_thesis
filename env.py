@@ -145,6 +145,9 @@ class AugmentingEnv(VanillaEnv):
                                 interpolation=InterpolationMode.NEAREST).numpy()
         return aug_obs
 
+
+
+
 class BCDataset(Dataset):
     def __init__(self, x, y):
         super().__init__()
@@ -222,8 +225,8 @@ def generate_bc_dataset(envs, batch_size, batch_count, balanced=False):
     data: BCDataset = BCDataset(states, actions)
     train_set_length = int(len(data) * 0.8)
     train_set, val_set = torch.utils.data.random_split(data, [train_set_length, len(data) - train_set_length])
-    train_loader: DataLoader = DataLoader(train_set, batch_size=64, shuffle=True)
-    test_loader: DataLoader = DataLoader(val_set, batch_size=64, shuffle=True)
+    train_loader: DataLoader = DataLoader(train_set, batch_size=batch_size, shuffle=True)
+    test_loader: DataLoader = DataLoader(val_set, batch_size=batch_size, shuffle=True)
     return train_loader, test_loader
 
 
