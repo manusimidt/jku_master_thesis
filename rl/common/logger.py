@@ -1,5 +1,6 @@
 import abc
 import os
+import time
 from collections import deque
 from pathlib import Path
 import numpy as np
@@ -9,8 +10,16 @@ import matplotlib
 from torch.utils.tensorboard import SummaryWriter
 
 
+def get_date_str() -> str:
+    """
+    Returns a date string in the form of YYMMDD-HHMMSS
+    """
+    return time.strftime("%y%m%d-%H%M%S")
+
+
 class Logger(abc.ABC):
     """ Extracts and/or persists tracker information. """
+
     def __init__(self):
         pass
 
@@ -51,6 +60,37 @@ class ConsoleLogger(Logger):
         msg = f"Episode: {str(episode).rjust(6)}, avg.ret.: {np.mean(self.return_queue):.4f} " \
               f"(over last {self.average_over} episodes)"
         print(msg)
+
+
+class CSVLogger(Logger):
+
+    def __init__(self, log_dir: str, log_name: str, columns: [str]):
+        super().__init__()
+        self.filepath = log_dir + os.sep + log_name + '.csv'
+        self.columns = columns
+        if not os.path.exists(log_dir):
+            os.makedirs(log_dir)
+
+        with open(self.filepath, "w+") as csv_file:
+            csv_file.write(','.join(columns))
+            csv_file.close()
+
+    def on_step(self, step: int, **kwargs):
+        pass
+
+    def on_epoch_end(self, epoch: int, **kwargs):
+        sorted_array = [''] * len(self.columns)
+        for arg in kwargs:
+            if arg in self.columns:
+                sorted_array[self.columns.index(arg)] = str(kwargs[arg])
+
+        with open(self.filepath, "a") as csv_file:
+            csv_file.write('\n')
+            csv_file.write(','.join(sorted_array))
+            csv_file.close()
+
+    def on_episode_end(self, episode: int, **kwargs):
+        pass
 
 
 class TensorboardLogger(Logger):

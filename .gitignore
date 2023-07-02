@@ -11,7 +11,7 @@ __pycache__/
 /ckpts-final
 /best-ckpts
 /runs
-
+experiments/
 # Distribution / packaging
 .Python
 build/
