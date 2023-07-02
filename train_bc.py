@@ -1,19 +1,19 @@
 import argparse
 import copy
+import json
 from multiprocessing import Pool
 
 import numpy as np
 
 from common import set_seed
-from env import VanillaEnv, TRAIN_CONFIGURATIONS, BCDataset, generate_bc_dataset, AugmentingEnv
+from env import VanillaEnv, TRAIN_CONFIGURATIONS, generate_bc_dataset, AugmentingEnv
 from policy import ActorNet
-from rl.common.buffer2 import Transition, Episode
 import torch
 import torch.optim as optim
 import torch.nn as nn
-from torch.utils.data import Dataset, DataLoader
-from typing import List
-from rl.ppo.ppo import PPO
+from torch.utils.data import DataLoader
+
+from rl.common.logger import CSVLogger, get_date_str
 
 
 @torch.enable_grad()
@@ -54,8 +54,18 @@ def evaluate(net: ActorNet, dataLoader: DataLoader, loss_actor):
     return actor_errors
 
 
-def main(model, hyperparams: dict, train_loader, test_loader):
+def main(model, hyperparams: dict, logger: CSVLogger):
     set_seed(hyperparams['seed'], env=None)
+    conf = list(TRAIN_CONFIGURATIONS[hyperparams['conf']])
+    if hyperparams['env'] == 'vanilla':
+        env = VanillaEnv(conf)
+    else:
+        env = AugmentingEnv(conf)
+
+    print(f"Generating expert episodes...")
+    train_loader, test_loader = generate_bc_dataset([env], hyperparams['batch_size'], hyperparams['batch_count'],
+                                                    balanced=hyperparams['balanced'])
+
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print("Training on ", device)
 
@@ -64,23 +74,30 @@ def main(model, hyperparams: dict, train_loader, test_loader):
 
     loss_actor = nn.CrossEntropyLoss()
 
+    total_train_loss, total_test_loss = [], []
     for epoch in range(hyperparams['n_epochs']):
-        actor_errors = train(model, train_loader, optim_actor, loss_actor)
-        val_actor_errors = evaluate(model, test_loader, loss_actor)
+        train_loss = np.mean(train(model, train_loader, optim_actor, loss_actor))
+        test_loss = np.mean(evaluate(model, test_loader, loss_actor))
 
-        print(f"Epoch {epoch} Train errors: Actor {np.mean(actor_errors):.8f}, "
-              f"Val errors: Actor {np.mean(val_actor_errors):.8f}")
+        print(f"Epoch {epoch} Train errors: {train_loss:.8f}, Val errors: {test_loss:.8f}")
+        total_train_loss.append(train_loss)
+        total_test_loss.append(test_loss)
+        logger.on_epoch_end(epoch, train_loss=train_loss, test_loss=test_loss)
 
     state = {
         'state_dict': model.state_dict(),
         'optimizer': optim_actor.state_dict(),
-        'info': {'conf': hyperparams['conf']}
+        'info': {'conf': conf}
     }
-    torch.save(state, f'ckpts/bc-agent-{hyperparams["seed"]}.pth')
+    torch.save(state, logger.filepath.replace('.csv', '.pth'))
+    # save hyperparams
+    with open(logger.filepath.replace('.csv', '.json'), "w") as outfile:
+        json.dump(hyperparams, outfile, indent=2)
+    return total_train_loss, total_test_loss
 
 
 if __name__ == '__main__':
-    _base_model = ''
+    set_seed(123, None)  # Base seed
     parser = argparse.ArgumentParser()
     parser.add_argument("-e", "--env", choices=["vanilla", "random"], default="vanilla",
                         help="The environment to train on")
@@ -92,7 +109,7 @@ if __name__ == '__main__':
     parser.add_argument("-bc", "--batch_count", default=10, type=int,
                         help="Number of batches. BC will be trained on batch_size x batch_count samples")
 
-    parser.add_argument("-b", "--balanced", default=False, type=bool,
+    parser.add_argument("--balanced", default=True, type=bool, action=argparse.BooleanOptionalAction,
                         help="If true, the algorithm will be trained on a balanced dataset (1/3 action 1, 2/3 action 0 "
                              "examples)")
 
@@ -107,28 +124,23 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
     hyperparams = copy.deepcopy(vars(args))
-
-    conf = list(TRAIN_CONFIGURATIONS[hyperparams['conf']])
-    hyperparams['conf'] = conf
-    if hyperparams['env'] == 'vanilla':
-        env = VanillaEnv(conf)
-    else:
-        env = AugmentingEnv(conf)
-
-    print(f"Generating expert episodes...")
-    train_loader, test_loader = generate_bc_dataset([env], hyperparams['batch_size'], hyperparams['batch_count'],
-                                                    balanced=hyperparams['balanced'])
-
+    print(hyperparams)
     if len(args.seed) == 1:
         # convert the list to a single value
         hyperparams['seed'] = hyperparams['seed'][0]
-        main(ActorNet(), hyperparams, train_loader, test_loader)
+        logger = CSVLogger(f'./experiments/{get_date_str()}/', f'train_bc{hyperparams["seed"]}',
+                           columns=["train_loss", "test_loss"])
+        main(ActorNet(), hyperparams, logger)
+
     else:
         params_arr = []
         for i in range(len(args.seed)):
             curr_hyperparams = copy.deepcopy(hyperparams)
             curr_hyperparams['seed'] = hyperparams['seed'][i]
-            params_arr.append((ActorNet(), curr_hyperparams, train_loader, test_loader))
-        with Pool(5) as p:
-            results = p.starmap(main, params_arr)
-            print(results)
+
+            logger = CSVLogger(f'./experiments/{get_date_str()}/', f'train_bc{curr_hyperparams["seed"]}',
+                               columns=["train_loss", "test_loss"])
+            params_arr.append((ActorNet(), curr_hyperparams, logger))
+        with Pool(4) as p:
+            p.starmap(main, params_arr)
+

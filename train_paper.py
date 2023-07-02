@@ -105,8 +105,8 @@ if __name__ == '__main__':
     hyperparams = {
         "K": 50_000,
         "lr": 0.0026,
-        "alpha1": 5,  # alignment loss scaling
-        "alpha2": .5,  # BC loss scaling
+        "alpha1": .5,  # alignment loss scaling
+        "alpha2": .01,  # BC loss scaling
         "beta": 0.7,  # PSM scaling
         "lambda": 1.0,  # inverse temperature
         "psm": "fb",

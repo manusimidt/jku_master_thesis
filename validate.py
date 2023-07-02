@@ -2,7 +2,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 from matplotlib.backends.backend_agg import FigureCanvasAgg
-
+import gym
 from common import set_seed, map_conf_to_index, plot_evaluation_grid
 from env import VanillaEnv
 from policy import ActorNet
@@ -51,3 +51,21 @@ def validate(model: ActorNet, device, train_configurations):
     width, height = fig.get_size_inches() * fig.get_dpi()
     image = np.frombuffer(canvas.tostring_rgb(), dtype='uint8').reshape(int(height), int(width), 3)
     return image, generalization_performance
+
+
+if __name__ == '__main__':
+    envs = gym.vector.AsyncVectorEnv([
+        lambda: VanillaEnv([(14, 0), ]),
+        lambda: VanillaEnv([(14, 4), ]),
+        lambda: VanillaEnv([(14, 8), ]),
+        lambda: VanillaEnv([(14, 12), ]),
+        lambda: VanillaEnv([(14, 16), ]),
+        lambda: VanillaEnv([(14, 20), ]),
+        lambda: VanillaEnv([(14, 24), ]),
+        lambda: VanillaEnv([(14, 28), ]),
+        lambda: VanillaEnv([(14, 32), ]),
+        lambda: VanillaEnv([(14, 36), ]),
+        lambda: VanillaEnv([(14, 40), ]),
+    ])
+
+    print(envs.reset().shape)
