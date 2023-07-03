@@ -1,3 +1,5 @@
+import argparse
+import copy
 import random
 import torch
 import time
@@ -64,38 +66,71 @@ def train(Mx: VanillaEnv, My: VanillaEnv, net, optim, alpha, beta, inv_temp, psm
     contrastive_loss = (loss / statesY.shape[0])
 
     # Add BC loss
-    # idx = random.sample(range(len(bc_data[0])), 64)
-    # bc_states, bc_actions = torch.tensor(bc_data[0][idx]).to(device), torch.tensor(bc_data[1][idx]).to(device)
-    # states_y_logits = net.forward(bc_states, contrastive=False)
-    # cross_entropy_loss = loss_bc(states_y_logits, bc_actions.to(torch.int64))
+    idx = random.sample(range(len(bc_data[0])), 64)
+    bc_states, bc_actions = torch.tensor(bc_data[0][idx]).to(device), torch.tensor(bc_data[1][idx]).to(device)
+    states_y_logits = net.forward(bc_states, contrastive=False)
+    cross_entropy_loss = loss_bc(states_y_logits, bc_actions.to(torch.int64))
 
-    total_loss = alpha * contrastive_loss # + cross_entropy_loss
+    total_loss = alpha * contrastive_loss + cross_entropy_loss
     optim.zero_grad()
     total_loss.backward()
     optim.step()
     avg_pos_sim = (avg_pos_sim / statesY.shape[0]).item()
     avg_neg_sim = (avg_neg_sim / statesY.shape[0]).item()
-    # return total_loss.item(), contrastive_loss.item(), cross_entropy_loss.item(), avg_pos_sim, avg_neg_sim
-    return total_loss.item(), contrastive_loss.item(), 0, avg_pos_sim, avg_neg_sim
+    return total_loss.item(), contrastive_loss.item(), cross_entropy_loss.item(), avg_pos_sim, avg_neg_sim
 
 
 if __name__ == '__main__':
-    seed = 31
-    set_seed(seed, env=None)
+    set_seed(40, None)  # Base seed
+
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument("-e", "--env", choices=["vanilla", "random"], default="vanilla",
+                        help="The environment to train on")
+    parser.add_argument("-c", "--conf", choices=["narrow_grid", "wide_grid"], default="wide_grid",
+                        help="The environment configuration to train on")
+
+    parser.add_argument("-psm", "--psm", choices=["f", "fb"], default="f",
+                        help="The PSM distance function to use (f=forward PSM, fb=forward-backward PSM)")
+
+    parser.add_argument("-bs", "--batch_size", default=256, type=int,
+                        help="Size of one Minibatch")
+    parser.add_argument("-bc", "--batch_count", default=10, type=int,
+                        help="Number of batches. BC will be trained on batch_size x batch_count samples")
+
+    parser.add_argument("--balanced", default=True, type=bool, action=argparse.BooleanOptionalAction,
+                        help="If true, the algorithm will be trained on a balanced dataset (1/3 action 1, 2/3 action 0 "
+                             "examples)")
+
+    parser.add_argument("-lr", "--learning_rate", default=0.0004, type=float,
+                        help="Learning rate for the optimizer")
+    parser.add_argument("-K", "--n_iterations", default=3_000, type=int,
+                        help="Number of total training steps")
+
+    parser.add_argument("-a", "--alpha", default=.1, type=float,
+                        help="Scaling factor for the alignment loss")
+
+    parser.add_argument("-b", "--beta", default=1.0, type=float,
+                        help="Scaling factor for the PSM")
+
+    parser.add_argument("-l", "--lambda", default=1.0, type=float,
+                        help="Inverse temperature")
+
+    parser.add_argument("-s", "--seed", default=[1], type=int, nargs='+',
+                        help="The seed to train on. If multiple values are provided, the script will "
+                             "spawn a new process for each seed")
+
+    args = parser.parse_args()
+    hyperparams = copy.deepcopy(vars(args))
+    if len(args.seed) == 1:
+        # convert the list to a single value
+        hyperparams['seed'] = hyperparams['seed'][0]
+    else:
+        raise NotImplemented("Todo: Add Multiprocessing!")
+    print(hyperparams)
+
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print("Training on ", device)
-
-    hyperparams = {
-        "K": 3_000,
-        "lr": 0.0026,
-        "alpha": .1,  # alignment loss scaling
-        "beta": 1.0,  # PSM scaling
-        "lambda": 1.0,  # inverse temperature
-        "psm": "fb",
-        "conf": "wide_grid",
-        "script": "train.py",
-        "info": "Trained without BC!"
-    }
 
     configurations = TRAIN_CONFIGURATIONS[hyperparams["conf"]]
     training_MDPs = []
@@ -106,7 +141,7 @@ if __name__ == '__main__':
     psm_func = psm_functions[hyperparams["psm"]]
     net = ActorNet().to(device)
 
-    optim = optim.Adam(net.parameters(), lr=hyperparams['lr'])
+    optim = optim.Adam(net.parameters(), lr=hyperparams['learning_rate'])
     loss_bc = nn.CrossEntropyLoss()
 
     tb = SummaryWriter()
@@ -114,7 +149,7 @@ if __name__ == '__main__':
 
     bc_data = env.generate_bc_data(training_MDPs, 4096 * 2, balanced=True)
 
-    for i in range(hyperparams['K']):
+    for i in range(hyperparams['n_iterations']):
         # Sample a pair of training MDPs
         Mx, My = random.sample(training_MDPs, 2)
         # todo only for debugging!
@@ -131,10 +166,10 @@ if __name__ == '__main__':
         tb.add_scalar("debug/positive_similarity", avg_pos_sim, i)
         tb.add_scalar("debug/negative_similarity", avg_neg_sim, i)
 
-        # if i % 1000 == 0:
-        #     fig, perf = validate(net, device, configurations)
-        #     tb.add_scalar("val/generalization", perf, i)
-        #     tb.add_image("val/fig", fig, i, dataformats="HWC")
+        if i % 250 == 0:
+            fig, perf = validate(net, device, configurations)
+            tb.add_scalar("val/generalization", perf, i)
+            tb.add_image("val/fig", fig, i, dataformats="HWC")
     state = {
         'state_dict': net.state_dict(),
         'optimizer': optim.state_dict(),

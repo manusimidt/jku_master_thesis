@@ -83,7 +83,7 @@ def train(Mx: VanillaEnv, My: VanillaEnv, net, optim, alpha1, alpha2, beta, inv_
     # states_y_logits = net.forward(statesY, contrastive=False)
     # actionsY = actionsY.to(device).to(torch.int64)
     # cross_entropy_loss = loss_bc(states_y_logits, actionsY)
-    idx = random.sample(range(len(bc_data[0])), 64)
+    idx = random.sample(range(len(bc_data[0])), 256)
     bc_states, bc_actions = torch.tensor(bc_data[0][idx]).to(device), torch.tensor(bc_data[1][idx]).to(device)
     states_y_logits = net.forward(bc_states, contrastive=False)
     cross_entropy_loss = loss_bc(states_y_logits, bc_actions.to(torch.int64))
@@ -97,7 +97,7 @@ def train(Mx: VanillaEnv, My: VanillaEnv, net, optim, alpha1, alpha2, beta, inv_
 
 
 if __name__ == '__main__':
-    seed = 31
+    seed = 20
     set_seed(seed, env=None)
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print("Training on ", device)
@@ -109,7 +109,7 @@ if __name__ == '__main__':
         "alpha2": .01,  # BC loss scaling
         "beta": 0.7,  # PSM scaling
         "lambda": 1.0,  # inverse temperature
-        "psm": "fb",
+        "psm": "f",
         "conf": "wide_grid",
         "script": "train_paper.py"
     }
