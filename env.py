@@ -16,17 +16,17 @@ import augmentations
 from gym_jumping_task.envs import JumpTaskEnv
 
 TRAIN_CONFIGURATIONS = {
-    "narrow_grid": {
-        # (obstacle_pos, floor_height)
-        (26, 12), (29, 12), (31, 12), (34, 12),
-        (26, 20), (29, 20), (31, 20), (34, 20),
-        (26, 28), (29, 28), (31, 28), (34, 28),
-    },
     "wide_grid": {
         # (obstacle_pos, floor_height)
-        (22, 8), (27, 8), (32, 8), (38, 8),
-        (22, 20), (27, 20), (32, 20), (38, 20),
-        (22, 32), (27, 32), (32, 32), (38, 32),
+        (20, 10), (25, 10), (30, 10), (35, 10), (40, 10), (45, 10),
+        (20, 15), (25, 15), (30, 15), (35, 15), (40, 15), (45, 15),
+        (20, 20), (25, 20), (30, 20), (35, 20), (40, 20), (45, 20),
+    },
+    "narrow_grid": {
+        # (obstacle_pos, floor_height)
+        (28, 13), (30, 13), (32, 13), (34, 13), (36, 13), (38, 13),
+        (28, 15), (30, 15), (32, 15), (34, 15), (36, 15), (38, 15),
+        (28, 17), (30, 17), (32, 17), (34, 17), (36, 17), (38, 17),
     }
 }
 
@@ -49,10 +49,10 @@ POSSIBLE_AUGMENTATIONS = [
 
 class VanillaEnv(gym.Env):
     metadata = {"render.modes": ["human"]}
-    min_obstacle_pos = 14
-    max_obstacle_pos = 47
-    min_floor_height = 0
-    max_floor_height = 40
+    # min_obstacle_pos = 14
+    # max_obstacle_pos = 47
+    # min_floor_height = 0
+    # max_floor_height = 48
 
     def __init__(self, configurations: List[tuple] or None = None, rendering=False):
         """

@@ -7,10 +7,8 @@ from policy import ActorNet
 
 n_obstacle_pos = 26  # how many obstacle position you want to try out (paper: 27, max: 30)
 n_floor_heights = 11  # how many floor heights you want to try out (paper: 11, max: 40)
-obstacle_pos = np.rint(np.linspace(VanillaEnv.min_obstacle_pos, VanillaEnv.max_obstacle_pos, n_obstacle_pos)).astype(
-    np.int8)
-floor_height = np.rint(np.linspace(VanillaEnv.min_floor_height, VanillaEnv.max_floor_height, n_floor_heights)).astype(
-    np.int8)
+obstacle_pos = np.rint(np.linspace(20, 45, n_obstacle_pos)).astype(np.int8)
+floor_height = np.rint(np.linspace(10, 20, n_floor_heights)).astype(np.int8)
 
 
 def validate(model: ActorNet, device, train_configurations):
