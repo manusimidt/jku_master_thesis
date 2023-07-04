@@ -1,6 +1,9 @@
 import argparse
 import copy
+import os
 import random
+from multiprocessing import Pool
+
 import torch
 import time
 import numpy as np
@@ -10,16 +13,17 @@ from torch.utils.tensorboard import SummaryWriter
 
 import env
 from common import dict2mdtable, set_seed
-from env import VanillaEnv, TRAIN_CONFIGURATIONS, generate_expert_episode
+from env import VanillaEnv, AugmentingEnv, TRAIN_CONFIGURATIONS, generate_expert_episode
 
 from policy import ActorNet
 import torch.nn.functional as F
 import psm
+from rl.common.logger import get_date_str
 from validate import validate
 
 
 @torch.enable_grad()
-def train(Mx: VanillaEnv, My: VanillaEnv, net, optim, alpha, beta, inv_temp, psm_func, bc_data, loss_bc):
+def train(Mx: VanillaEnv, My: VanillaEnv, net, optim, alpha1, alpha2, beta, inv_temp, psm_func, bc_data, loss_bc):
     device = next(net.parameters()).device
     net.train()
 
@@ -71,7 +75,7 @@ def train(Mx: VanillaEnv, My: VanillaEnv, net, optim, alpha, beta, inv_temp, psm
     states_y_logits = net.forward(bc_states, contrastive=False)
     cross_entropy_loss = loss_bc(states_y_logits, bc_actions.to(torch.int64))
 
-    total_loss = alpha * contrastive_loss + cross_entropy_loss
+    total_loss = alpha1 * contrastive_loss + alpha2 * cross_entropy_loss
     optim.zero_grad()
     total_loss.backward()
     optim.step()
@@ -80,10 +84,65 @@ def train(Mx: VanillaEnv, My: VanillaEnv, net, optim, alpha, beta, inv_temp, psm
     return total_loss.item(), contrastive_loss.item(), cross_entropy_loss.item(), avg_pos_sim, avg_neg_sim
 
 
+def main(hyperparams: dict):
+    set_seed(hyperparams['seed'], None)
+
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    print("Training on ", device)
+
+    configurations = TRAIN_CONFIGURATIONS[hyperparams["conf"]]
+    training_MDPs = []
+    for conf in configurations:
+        training_MDPs.append(env.AugmentingEnv([conf]))
+
+    psm_functions = {"f": psm.psm_f_fast, "fb": psm.psm_fb_fast}
+    psm_func = psm_functions[hyperparams["psm"]]
+    net = ActorNet().to(device)
+
+    optimizer = optim.Adam(net.parameters(), lr=hyperparams['learning_rate'])
+    loss_bc = nn.CrossEntropyLoss()
+
+    tb = SummaryWriter(log_dir=hyperparams['train_dir'] + os.sep + str(hyperparams['seed']))
+    tb.add_text('info/args', dict2mdtable(hyperparams))
+
+    bc_data = env.generate_bc_data(training_MDPs, 4096 * 2, balanced=True)
+
+    for i in range(hyperparams['n_iterations']):
+        # Sample a pair of training MDPs
+        Mx, My = random.sample(training_MDPs, 2)
+
+        info = train(Mx, My, net, optimizer, hyperparams['alpha1'], hyperparams['alpha2'], hyperparams['beta'],
+                     hyperparams['lambda'], psm_func,
+                     bc_data, loss_bc)
+
+        total_err, contrastive_err, cross_entropy_err, avg_pos_sim, avg_neg_sim = info
+        print(f"Iteration {i}. Loss: {total_err:2.3f}")
+
+        tb.add_scalar("loss/total", total_err, i)
+        tb.add_scalar("loss/contrastive", contrastive_err, i)
+        tb.add_scalar("loss/bc", cross_entropy_err, i)
+        tb.add_scalar("debug/positive_similarity", avg_pos_sim, i)
+        tb.add_scalar("debug/negative_similarity", avg_neg_sim, i)
+
+        if i % 250 == 0:
+            fig, perf = validate(net, device, configurations)
+            tb.add_scalar("val/generalization", perf, i)
+            tb.add_image("val/fig", fig, i, dataformats="HWC")
+    state = {
+        'state_dict': net.state_dict(),
+        'optimizer': optimizer.state_dict(),
+        'info': {'conf': configurations}
+    }
+    torch.save(state, 'ckpts/' + tb.log_dir.split('\\')[-1] + ".pth")
+
+
 if __name__ == '__main__':
-    set_seed(40, None)  # Base seed
+    set_seed(123, None)  # Base seed
 
     parser = argparse.ArgumentParser()
+
+    parser.add_argument("--train_dir", default=f'./experiments/{get_date_str()}/',
+                        help="The directory to store the results from this run into")
 
     parser.add_argument("-e", "--env", choices=["vanilla", "random"], default="vanilla",
                         help="The environment to train on")
@@ -107,8 +166,11 @@ if __name__ == '__main__':
     parser.add_argument("-K", "--n_iterations", default=3_000, type=int,
                         help="Number of total training steps")
 
-    parser.add_argument("-a", "--alpha", default=.1, type=float,
+    parser.add_argument("-a1", "--alpha1", default=5., type=float,
                         help="Scaling factor for the alignment loss")
+
+    parser.add_argument("-a2", "--alpha2", default=1., type=float,
+                        help="Scaling factor for the BC loss")
 
     parser.add_argument("-b", "--beta", default=1.0, type=float,
                         help="Scaling factor for the PSM")
@@ -125,54 +187,13 @@ if __name__ == '__main__':
     if len(args.seed) == 1:
         # convert the list to a single value
         hyperparams['seed'] = hyperparams['seed'][0]
+        main(hyperparams)
     else:
-        raise NotImplemented("Todo: Add Multiprocessing!")
-    print(hyperparams)
+        params_arr = []
+        for i in range(len(args.seed)):
+            curr_hyperparams = copy.deepcopy(hyperparams)
+            curr_hyperparams['seed'] = hyperparams['seed'][i]
+            params_arr.append((curr_hyperparams, ))
+        with Pool(4) as p:
+            p.starmap(main, params_arr)
 
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    print("Training on ", device)
-
-    configurations = TRAIN_CONFIGURATIONS[hyperparams["conf"]]
-    training_MDPs = []
-    for conf in configurations:
-        training_MDPs.append(env.AugmentingEnv([conf]))
-
-    psm_functions = {"f": psm.psm_f_fast, "fb": psm.psm_fb_fast}
-    psm_func = psm_functions[hyperparams["psm"]]
-    net = ActorNet().to(device)
-
-    optim = optim.Adam(net.parameters(), lr=hyperparams['learning_rate'])
-    loss_bc = nn.CrossEntropyLoss()
-
-    tb = SummaryWriter()
-    tb.add_text('info/args', dict2mdtable(hyperparams))
-
-    bc_data = env.generate_bc_data(training_MDPs, 4096 * 2, balanced=True)
-
-    for i in range(hyperparams['n_iterations']):
-        # Sample a pair of training MDPs
-        Mx, My = random.sample(training_MDPs, 2)
-        # todo only for debugging!
-        # Mx, My = training_MDPs[0], training_MDPs[1]
-        info = train(Mx, My, net, optim, hyperparams['alpha'], hyperparams['beta'], hyperparams['lambda'], psm_func,
-                     bc_data, loss_bc)
-
-        total_err, contrastive_err, cross_entropy_err, avg_pos_sim, avg_neg_sim = info
-        print(f"Iteration {i}. Loss: {total_err:2.3f}")
-
-        tb.add_scalar("loss/total", total_err, i)
-        tb.add_scalar("loss/contrastive", contrastive_err, i)
-        tb.add_scalar("loss/bc", cross_entropy_err, i)
-        tb.add_scalar("debug/positive_similarity", avg_pos_sim, i)
-        tb.add_scalar("debug/negative_similarity", avg_neg_sim, i)
-
-        if i % 250 == 0:
-            fig, perf = validate(net, device, configurations)
-            tb.add_scalar("val/generalization", perf, i)
-            tb.add_image("val/fig", fig, i, dataformats="HWC")
-    state = {
-        'state_dict': net.state_dict(),
-        'optimizer': optim.state_dict(),
-        'info': {'conf': configurations}
-    }
-    torch.save(state, 'ckpts/' + tb.log_dir.split('\\')[-1] + ".pth")

@@ -1,6 +1,7 @@
 """
 This module holds different modified jumping tasks environments
 """
+import itertools
 import random
 
 import gym
@@ -14,6 +15,11 @@ import torchvision.transforms.functional as fn
 from torchvision.transforms.functional import InterpolationMode
 import augmentations
 from gym_jumping_task.envs import JumpTaskEnv
+
+n_obstacle_pos = 26  # how many obstacle position you want to try out (paper: 27, max: 30)
+n_floor_heights = 11  # how many floor heights you want to try out (paper: 11, max: 40)
+obstacle_pos = np.rint(np.linspace(20, 45, n_obstacle_pos)).astype(np.int8)
+floor_height = np.rint(np.linspace(10, 20, n_floor_heights)).astype(np.int8)
 
 TRAIN_CONFIGURATIONS = {
     "wide_grid": {
@@ -29,6 +35,12 @@ TRAIN_CONFIGURATIONS = {
         (28, 17), (30, 17), (32, 17), (34, 17), (36, 17), (38, 17),
     }
 }
+
+POSSIBLE_CONFIGURATIONS = set(itertools.product(obstacle_pos, floor_height))
+
+for key in TRAIN_CONFIGURATIONS:
+    for conf in TRAIN_CONFIGURATIONS[key]:
+        assert conf in POSSIBLE_CONFIGURATIONS, "Invalid Train configuration!"
 
 POSSIBLE_AUGMENTATIONS = [
     {'name': 'trans64', 'func': augmentations.random_translate, 'params': {'size': 64}},
@@ -47,8 +59,10 @@ POSSIBLE_AUGMENTATIONS = [
     {'name': 'flip', 'func': augmentations.random_flip, 'params': {}},
 ]
 
+
 class VanillaEnv(gym.Env):
     metadata = {"render.modes": ["human"]}
+
     # min_obstacle_pos = 14
     # max_obstacle_pos = 47
     # min_floor_height = 0
@@ -144,8 +158,6 @@ class AugmentingEnv(VanillaEnv):
             aug_obs = fn.resize(torch.from_numpy(aug_obs), size=[60, 60],
                                 interpolation=InterpolationMode.NEAREST).numpy()
         return aug_obs
-
-
 
 
 class BCDataset(Dataset):
@@ -249,6 +261,7 @@ def generate_positive_pairs(envs: [VanillaEnv]):
     # sample a random index along the common frames
     idx = np.random.randint(0, len(state2), size=1)[0]
     return state1[idx], state2[idx]
+
 
 if __name__ == '__main__':
 

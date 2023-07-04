@@ -103,13 +103,13 @@ if __name__ == '__main__':
     print("Training on ", device)
 
     hyperparams = {
-        "K": 50_000,
+        "K": 80_000,
         "lr": 0.0026,
-        "alpha1": .5,  # alignment loss scaling
-        "alpha2": .01,  # BC loss scaling
-        "beta": 0.7,  # PSM scaling
-        "lambda": 1.0,  # inverse temperature
-        "psm": "f",
+        "alpha1": 5.,  # alignment loss scaling
+        "alpha2": 1.,  # BC loss scaling
+        "beta": 1.,  # PSM scaling
+        "lambda": 0.5,  # inverse temperature
+        "psm": "fb",
         "conf": "wide_grid",
         "script": "train_paper.py"
     }
