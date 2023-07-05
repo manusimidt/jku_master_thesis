@@ -5,15 +5,12 @@ import random
 from multiprocessing import Pool
 
 import torch
-import time
-import numpy as np
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.tensorboard import SummaryWriter
 
-import env
 from common import dict2mdtable, set_seed
-from env import VanillaEnv, AugmentingEnv, TRAIN_CONFIGURATIONS, generate_expert_episode
+from env import VanillaEnv, AugmentingEnv, TRAIN_CONFIGURATIONS, generate_expert_episode, generate_bc_data
 
 from policy import ActorNet
 import torch.nn.functional as F
@@ -90,13 +87,14 @@ def main(hyperparams: dict):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print("Training on ", device)
 
+    psm_functions = {"f": psm.psm_f_fast, "fb": psm.psm_fb_fast}
+    psm_func = psm_functions[hyperparams["psm"]]
+
     configurations = TRAIN_CONFIGURATIONS[hyperparams["conf"]]
     training_MDPs = []
     for conf in configurations:
-        training_MDPs.append(env.AugmentingEnv([conf]))
+        training_MDPs.append(VanillaEnv([conf]) if hyperparams['env'] == 'vanilla' else AugmentingEnv([conf]))
 
-    psm_functions = {"f": psm.psm_f_fast, "fb": psm.psm_fb_fast}
-    psm_func = psm_functions[hyperparams["psm"]]
     net = ActorNet().to(device)
 
     optimizer = optim.Adam(net.parameters(), lr=hyperparams['learning_rate'])
@@ -105,7 +103,7 @@ def main(hyperparams: dict):
     tb = SummaryWriter(log_dir=hyperparams['train_dir'] + os.sep + str(hyperparams['seed']))
     tb.add_text('info/args', dict2mdtable(hyperparams))
 
-    bc_data = env.generate_bc_data(training_MDPs, 4096 * 2, balanced=True)
+    bc_data = generate_bc_data(training_MDPs, 4096 * 2, balanced=True)
 
     for i in range(hyperparams['n_iterations']):
         # Sample a pair of training MDPs
@@ -161,7 +159,7 @@ if __name__ == '__main__':
                         help="If true, the algorithm will be trained on a balanced dataset (1/3 action 1, 2/3 action 0 "
                              "examples)")
 
-    parser.add_argument("-lr", "--learning_rate", default=0.0004, type=float,
+    parser.add_argument("-lr", "--learning_rate", default=0.001, type=float,
                         help="Learning rate for the optimizer")
     parser.add_argument("-K", "--n_iterations", default=3_000, type=int,
                         help="Number of total training steps")
