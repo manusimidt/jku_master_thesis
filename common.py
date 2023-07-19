@@ -16,7 +16,7 @@ def plot_evaluation_grid(grid, training_positions):
     fig, ax = plt.subplots(figsize=(8, 4))
     grid_x, grid_y = grid.shape
     extent = (0, grid_x, grid_y, 0)
-    ax.imshow(grid.T, extent=extent, origin='lower', cmap='copper')
+    ax.imshow(grid.T, extent=extent, origin='lower', cmap='copper', vmin=0)
 
     x_ticks = np.arange(grid_x)
     y_ticks = np.arange(grid_y)

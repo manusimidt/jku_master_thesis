@@ -18,7 +18,7 @@ def rand_conv(images: torch.Tensor):
     pass
 
 
-def random_translate(images: torch.tensor, size, h1s=None, w1s=None) -> torch.Tensor:
+def random_translate(images: torch.tensor, size=65, h1s=None, w1s=None) -> torch.Tensor:
     """
     # Taken from https://github.com/MishaLaskin/rad
     # Augmentation that zooms out of the image and shifts the environment randomly around
@@ -40,7 +40,7 @@ def random_translate(images: torch.tensor, size, h1s=None, w1s=None) -> torch.Te
     return fn.resize(outs, size=[h, w], interpolation=InterpolationMode.BILINEAR, antialias=False)
 
 
-def random_crop(images: torch.tensor, crop) -> torch.tensor:
+def random_crop(images: torch.tensor, crop=50) -> torch.tensor:
     """
     # Taken from https://github.com/MishaLaskin/rad
     Randomly crops out an image (of size crop x crop) of the original image and scales it back up to the
