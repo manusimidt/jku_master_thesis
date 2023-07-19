@@ -30,15 +30,14 @@ def random_translate(images: torch.tensor, size, h1s=None, w1s=None) -> torch.Te
     # Taken from https://github.com/MishaLaskin/rad
     n, c, h, w = images.shape
     assert size >= h and size >= w
-    outs = np.zeros((n, c, size, size), dtype=np.float32)
+    outs = torch.zeros((n, c, size, size), dtype=images.dtype, device = images.device)
     h1s = np.random.randint(0, size - h + 1, n) if h1s is None else h1s
     w1s = np.random.randint(0, size - w + 1, n) if w1s is None else w1s
     for out, img, h1, w1 in zip(outs, images, h1s, w1s):
         out[:, h1:h1 + h, w1:w1 + w] = img
 
     # Resize the image
-    result: torch.tensor = torch.from_numpy(outs).to(images.device)
-    return fn.resize(result, size=[h, w], interpolation=InterpolationMode.BILINEAR)
+    return fn.resize(outs, size=[h, w], interpolation=InterpolationMode.BILINEAR, antialias=False)
 
 
 def random_crop(images: torch.tensor, crop) -> torch.tensor:
@@ -53,12 +52,12 @@ def random_crop(images: torch.tensor, crop) -> torch.tensor:
     crop_max = h - crop + 1
     w1 = np.random.randint(0, crop_max, n)
     h1 = np.random.randint(0, crop_max, n)
-    cropped = torch.empty((n, c, crop, crop), dtype=images.dtype)
+    cropped = torch.empty((n, c, crop, crop), dtype=images.dtype, device=images.device)
     for i, (img, w11, h11) in enumerate(zip(images, w1, h1)):
         cropped[i] = img[:, h11:h11 + crop, w11:w11 + crop]
 
-    # scale the iamge back up to its original shape
-    fn.resize(cropped, size=[h, w], interpolation=InterpolationMode.NEAREST)
+    # scale the image back up to its original shape
+    cropped = fn.resize(cropped, size=[h, w], interpolation=InterpolationMode.NEAREST)
     return cropped
 
 
@@ -85,7 +84,7 @@ def random_cutout(images: torch.tensor, min_cut, max_cut) -> torch.tensor:
     w1 = np.random.randint(min_cut, max_cut, n)
     h1 = np.random.randint(min_cut, max_cut, n)
 
-    cutouts = torch.empty((n, c, h, w), dtype=images.dtype)
+    cutouts = torch.empty((n, c, h, w), dtype=images.dtype, device=images.device)
     for i, (img, w11, h11) in enumerate(zip(images, w1, h1)):
         cut_img = img.clone()
         cut_img[:, h11:h11 + h11, w11:w11 + w11] = 0
@@ -102,7 +101,7 @@ def gaussian_blur(images: torch.tensor, kernel_size: int = 3, sigma: float = .5)
 
 
 def random_noise(images: torch.tensor, strength=0.05) -> torch.tensor:
-    noise = torch.normal(0, strength, size=images.shape)
+    noise = torch.normal(0, strength, size=images.shape, device=images.device)
     # make sure we dont have illegal pixel values (i.e.: 255.3 or 1.1)
     return torch.clip(images+noise, torch.min(images), torch.max(images))
 
