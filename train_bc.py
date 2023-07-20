@@ -3,103 +3,105 @@ import copy
 import json
 from multiprocessing import Pool
 
+import matplotlib.pyplot as plt
 import numpy as np
 
-from common import set_seed
-from env import VanillaEnv, TRAIN_CONFIGURATIONS, generate_bc_dataset, AugmentingEnv
+import augmentations
+from common import set_seed, plot_evaluation_grid, map_conf_to_index
+from env import VanillaEnv, TRAIN_CONFIGURATIONS, generate_bc_dataset, AugmentingEnv, JumpingExpertBuffer, obstacle_pos, \
+    floor_height
 from policy import ActorNet
 import torch
-import torch.optim as optim
+from torch.optim import Optimizer, Adam
 import torch.nn as nn
 from torch.utils.data import DataLoader
 
 from rl.common.logger import CSVLogger, get_date_str
+from validate import validate
 
 
 @torch.enable_grad()
-def train(net: ActorNet, dataLoader: DataLoader, optim_actor, loss_actor=nn.CrossEntropyLoss()):
-    device = next(net.parameters()).device
+def train(net: ActorNet, buffer: JumpingExpertBuffer, batch_size: int, optim_actor: Optimizer,
+          loss_actor=nn.CrossEntropyLoss(), augmentation=augmentations.identity):
+    """
+    Trains the network on a randomly sampled batch and applies the given augmentation to each batch
+    """
     net.train()
-    actor_errors = []
 
-    for batch in dataLoader:
-        # X is the observation
-        # y contains the choosen action and the return estimate from the critic
-        X, y = batch[0].to(device), batch[1].to(device)
+    states, actions = buffer.sample(batch_size)
+    aug_states = augmentation(states)
 
-        pred_action_logits = net.forward(X, contrastive=False, full_network=True)
+    pred_action_logits = net.forward(aug_states, contrastive=False, full_network=True)
+    actor_error = loss_actor(pred_action_logits, actions)
 
-        actor_error = loss_actor(pred_action_logits, y.to(torch.int64))
+    optim_actor.zero_grad()
+    actor_error.backward()
+    optim_actor.step()
 
-        optim_actor.zero_grad()
-        actor_error.backward()
-        optim_actor.step()
-
-        actor_errors.append(actor_error.item())
-
-    return actor_errors
+    return actor_error.item()
 
 
 @torch.no_grad()
-def evaluate(net: ActorNet, dataLoader: DataLoader, loss_actor):
-    device = next(net.parameters()).device
+def evaluate(net: ActorNet, buffer: JumpingExpertBuffer, batch_size: int, optim_actor: Optimizer,
+             loss_actor=nn.CrossEntropyLoss()):
+    """
+    Evaluates the network on a randomly sampled batch without applying any augmentation!
+    """
     net.eval()
-    actor_errors = []
 
-    for batch in dataLoader:
-        X, y = batch[0].to(device), batch[1].to(device)
-        pred_action_logits = net.forward(X, contrastive=False)
-        actor_errors.append(loss_actor(pred_action_logits, y.to(torch.int64)).item())
+    states, actions = buffer.sample(batch_size)
 
-    return actor_errors
+    pred_action_logits = net.forward(states, contrastive=False)
+    actor_error = loss_actor(pred_action_logits, actions)
+
+    return actor_error.item()
 
 
 def main(model, hyperparams: dict, logger: CSVLogger):
     set_seed(hyperparams['seed'], env=None)
     conf = list(TRAIN_CONFIGURATIONS[hyperparams['conf']])
-    if hyperparams['env'] == 'vanilla':
-        env = VanillaEnv(conf)
-    else:
-        env = AugmentingEnv(conf)
-
-    print(f"Generating expert episodes...")
-    train_loader, test_loader = generate_bc_dataset([env], hyperparams['batch_size'], hyperparams['batch_count'],
-                                                    balanced=hyperparams['balanced'])
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print("Training on ", device)
 
+    buffer = JumpingExpertBuffer(conf, device, hyperparams['seed'])
+
     model = model.to(device)
-    optim_actor = optim.Adam(model.parameters(), lr=hyperparams['learning_rate'])
+    optimizer = Adam(model.parameters(), lr=hyperparams['learning_rate'])
 
-    loss_actor = nn.CrossEntropyLoss()
+    loss_func = nn.CrossEntropyLoss()
 
-    total_train_loss, total_test_loss = [], []
-    for epoch in range(hyperparams['n_epochs']):
-        train_loss = np.mean(train(model, train_loader, optim_actor, loss_actor))
-        test_loss = np.mean(evaluate(model, test_loader, loss_actor))
+    for step in range(hyperparams['steps']):
+        train_loss = train(model, buffer, hyperparams['batch_size'], optimizer, loss_func,
+                           augmentation=augmentations.aug_map[hyperparams['augmentation']])
+        test_loss = evaluate(model, buffer, hyperparams['batch_size'], optimizer, loss_func)
 
-        print(f"Epoch {epoch} Train errors: {train_loss:.8f}, Val errors: {test_loss:.8f}")
-        total_train_loss.append(train_loss)
-        total_test_loss.append(test_loss)
-        logger.on_epoch_end(epoch, train_loss=train_loss, test_loss=test_loss)
+        print(f"Step {step} Train err: {train_loss:.6f}, Test err: {test_loss:.6f}", end='')
+
+        if step % 1000 == 0:
+            grid, train_perf, test_perf, total_perf = validate(model, device, TRAIN_CONFIGURATIONS[hyperparams['conf']])
+            print(f", train perf: {train_perf:.3f}, test perf: {test_perf:.3f}, total perf:  {total_perf:.3f}")
+        else:
+            print("")
+
+        logger.on_epoch_end(step, train_loss=train_loss, test_loss=test_loss)
 
     state = {
         'state_dict': model.state_dict(),
-        'optimizer': optim_actor.state_dict(),
+        'optimizer': optimizer.state_dict(),
         'info': {'conf': conf}
     }
     torch.save(state, logger.filepath.replace('.csv', '.pth'))
-    # save hyperparams
+    # # save hyperparams
     with open(logger.filepath.replace('.csv', '.json'), "w") as outfile:
         json.dump(hyperparams, outfile, indent=2)
-    return total_train_loss, total_test_loss
+    # return total_train_loss, total_test_loss
 
 
 if __name__ == '__main__':
     set_seed(123, None)  # Base seed
     parser = argparse.ArgumentParser()
-    parser.add_argument("-e", "--env", choices=["vanilla", "random"], default="vanilla",
+    parser.add_argument("-e", "--env", choices=["vanilla", "random"], default="random",
                         help="The environment to train on")
     parser.add_argument("-c", "--conf", choices=["narrow_grid", "wide_grid"], default="wide_grid",
                         help="The environment configuration to train on")
@@ -115,8 +117,12 @@ if __name__ == '__main__':
 
     parser.add_argument("-lr", "--learning_rate", default=0.0004, type=float,
                         help="Learning rate for the optimizer")
-    parser.add_argument("-ne", "--n_epochs", default=20, type=int,
-                        help="Number of epochs (Number of times the training will run over the entire dataset)")
+    parser.add_argument("-K", "--steps", default=2001, type=int,
+                        help="Number of training steps")
+
+    parser.add_argument("-aug", "--augmentation", default="identity",
+                        choices=list(augmentations.aug_map.keys()),
+                        help="The augmentation that should be applied to the states")
 
     parser.add_argument("-s", "--seed", default=[1], type=int, nargs='+',
                         help="The seed to train on. If multiple values are provided, the script will "
@@ -141,6 +147,5 @@ if __name__ == '__main__':
             logger = CSVLogger(f'./experiments/{get_date_str()}/', f'train_bc{curr_hyperparams["seed"]}',
                                columns=["train_loss", "test_loss"])
             params_arr.append((ActorNet(), curr_hyperparams, logger))
-        with Pool(4) as p:
+        with Pool(3) as p:
             p.starmap(main, params_arr)
-

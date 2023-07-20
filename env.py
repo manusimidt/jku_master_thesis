@@ -43,20 +43,21 @@ for key in TRAIN_CONFIGURATIONS:
         assert conf in POSSIBLE_CONFIGURATIONS, "Invalid Train configuration!"
 
 POSSIBLE_AUGMENTATIONS = [
-    {'name': 'trans64', 'func': augmentations.random_translate, 'params': {'size': 64}},
-    {'name': 'trans68', 'func': augmentations.random_translate, 'params': {'size': 68}},
-    {'name': 'trans72', 'func': augmentations.random_translate, 'params': {'size': 72}},
-    {'name': 'crop59', 'func': augmentations.random_crop, 'params': {'out': 59}},
-    {'name': 'crop58', 'func': augmentations.random_crop, 'params': {'out': 58}},
-    {'name': 'crop57', 'func': augmentations.random_crop, 'params': {'out': 57}},
-    {'name': 'cut5', 'func': augmentations.random_cutout, 'params': {'min_cut': 2, 'max_cut': 5}},
-    {'name': 'cut15', 'func': augmentations.random_cutout, 'params': {'min_cut': 5, 'max_cut': 15}},
-    {'name': 'cut20', 'func': augmentations.random_cutout, 'params': {'min_cut': 10, 'max_cut': 20}},
-    {'name': 'blur1', 'func': augmentations.gaussian_blur, 'params': {'sigma': .6}},
-    {'name': 'blur2', 'func': augmentations.gaussian_blur, 'params': {'sigma': 1.2}},
-    {'name': 'noise1', 'func': augmentations.random_noise, 'params': {'strength': .02}},
-    {'name': 'noise2', 'func': augmentations.random_noise, 'params': {'strength': .05}},
-    {'name': 'flip', 'func': augmentations.random_flip, 'params': {}},
+    # {'name': 'trans64', 'func': augmentations.random_translate, 'params': {'size': 64}},
+    # {'name': 'trans68', 'func': augmentations.random_translate, 'params': {'size': 68}},
+    # {'name': 'trans72', 'func': augmentations.random_translate, 'params': {'size': 75}},
+    # {'name': 'ident', 'func': augmentations.identity, 'params': {}},
+    # {'name': 'crop59', 'func': augmentations.random_crop, 'params': {'out': 59}},
+    # {'name': 'crop58', 'func': augmentations.random_crop, 'params': {'out': 58}},
+    {'name': 'crop57', 'func': augmentations.random_crop2, 'params': {'padding': 12}},
+    # {'name': 'cut5', 'func': augmentations.random_cutout, 'params': {'min_cut': 2, 'max_cut': 5}},
+    # {'name': 'cut15', 'func': augmentations.random_cutout, 'params': {'min_cut': 5, 'max_cut': 15}},
+    # {'name': 'cut20', 'func': augmentations.random_cutout, 'params': {'min_cut': 10, 'max_cut': 20}},
+    # {'name': 'blur1', 'func': augmentations.gaussian_blur, 'params': {'sigma': .6}},
+    # {'name': 'blur2', 'func': augmentations.gaussian_blur, 'params': {'sigma': 1.2}},
+    # {'name': 'noise1', 'func': augmentations.random_noise, 'params': {'strength': .02}},
+    # {'name': 'noise2', 'func': augmentations.random_noise, 'params': {'strength': .05}},
+    # {'name': 'flip', 'func': augmentations.random_flip, 'params': {}},
 ]
 
 
@@ -174,6 +175,50 @@ class BCDataset(Dataset):
         return self.x[index], self.y[index]
 
 
+class JumpingExpertBuffer:
+    """ A simple BC replay buffer to store episodes (without storing next_state) """
+
+    def __init__(self, training_pos: [tuple], device, seed):
+        self.training_pos = training_pos
+        self.device = device
+        self.seed = seed
+        self.buffer_size = len(training_pos) * 56  # There are 56 steps in an optimal episode
+        self.rng = np.random.default_rng(seed=seed)
+
+        self.states = torch.empty((self.buffer_size, 1, 60, 60), device=device, dtype=torch.float32)
+        self.actions = torch.empty(self.buffer_size, device=device, dtype=torch.int64)
+
+        self._populate()
+
+    def _populate(self):
+        i = 0
+        env = JumpTaskEnv()
+
+        for pos in self.training_pos:
+            jumping_pixel = pos[0] - 14
+
+            done = False
+            obs = env._reset(obstacle_position=pos[0], floor_height=pos[1])
+            step = 0
+
+            while not done:
+                action = 1 if step == jumping_pixel else 0
+                next_obs, reward, done, info = env.step(action)
+                assert bool(info['collision']) is False, "Trajectory not optimal!"
+
+                self.states[i] = torch.from_numpy(obs).to(self.device).unsqueeze(0)
+                self.actions[i] = action
+                i += 1
+
+                obs = next_obs
+                step += 1
+        assert i == self.buffer_size, "Buffer not correctly filled up"
+
+    def sample(self, batch_size):
+        ind = self.rng.choice(range(self.buffer_size), size=batch_size, replace=False)
+        return self.states[ind], self.actions[ind]
+
+
 def generate_expert_episode(env, numpy=True):
     """ Generates a single expert trajectory """
     states, actions = [], []
@@ -264,7 +309,8 @@ def generate_positive_pairs(envs: [VanillaEnv]):
 
 
 if __name__ == '__main__':
-
+    buffer = JumpingExpertBuffer(TRAIN_CONFIGURATIONS['wide_grid'], 'cuda', 3)
+    buffer.sample(12)
     _envs = [VanillaEnv()]
     for _env in _envs:
         _obs_arr = [_env.reset(), _env.step(0)[0], _env.step(0)[0], _env.step(0)[0], _env.step(1)[0]]

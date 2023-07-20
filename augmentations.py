@@ -15,7 +15,24 @@ from torchvision.transforms.functional import InterpolationMode
 
 
 def rand_conv(images: torch.Tensor):
-    pass
+    """
+    Taken from https://github.com/rraileanu/auto-drac/blob/master/data_augs.py
+    """
+    _device = images.device
+    n_batch, n_channels, img_h, img_w = images.shape
+    aug_images = torch.empty_like(images)
+
+    # initialize random convolution
+    conv_layer = nn.Conv2d(n_channels, n_channels, kernel_size=3, bias=False, padding=1).to(_device)
+    for param in conv_layer.parameters():
+        param.requires_grad_(False)
+
+    for i in range(n_batch):
+        torch.nn.init.xavier_normal_(conv_layer.weight.data)
+        aug_images[i] = conv_layer(images[i])
+
+    return torch.clip(aug_images, images.min(), images.max())
+
 
 
 def random_translate(images: torch.tensor, size=65, h1s=None, w1s=None) -> torch.Tensor:
@@ -30,7 +47,7 @@ def random_translate(images: torch.tensor, size=65, h1s=None, w1s=None) -> torch
     # Taken from https://github.com/MishaLaskin/rad
     n, c, h, w = images.shape
     assert size >= h and size >= w
-    outs = torch.zeros((n, c, size, size), dtype=images.dtype, device = images.device)
+    outs = torch.zeros((n, c, size, size), dtype=images.dtype, device=images.device)
     h1s = np.random.randint(0, size - h + 1, n) if h1s is None else h1s
     w1s = np.random.randint(0, size - w + 1, n) if w1s is None else w1s
     for out, img, h1, w1 in zip(outs, images, h1s, w1s):
@@ -73,7 +90,7 @@ def random_crop2(images: torch.tensor, padding=12) -> torch.tensor:
     return trans(images)
 
 
-def random_cutout(images: torch.tensor, min_cut, max_cut) -> torch.tensor:
+def random_cutout(images: torch.tensor, min_cut=10, max_cut=25) -> torch.tensor:
     """
     # Taken from https://github.com/MishaLaskin/rad
     :param images: images in the form [B, C, H, W]
@@ -103,8 +120,20 @@ def gaussian_blur(images: torch.tensor, kernel_size: int = 3, sigma: float = .5)
 def random_noise(images: torch.tensor, strength=0.05) -> torch.tensor:
     noise = torch.normal(0, strength, size=images.shape, device=images.device)
     # make sure we dont have illegal pixel values (i.e.: 255.3 or 1.1)
-    return torch.clip(images+noise, torch.min(images), torch.max(images))
+    return torch.clip(images + noise, torch.min(images), torch.max(images))
 
 
-def identity(images:any)->any:
+def identity(images: any) -> any:
     return images
+
+
+aug_map = {
+    "identity": identity,
+    "conv": rand_conv,
+    "translate": random_translate,
+    "crop1": random_crop,
+    "crop2": random_crop2,
+    "cutout": random_cutout,
+    "blur": gaussian_blur,
+    "noise": random_noise,
+}
