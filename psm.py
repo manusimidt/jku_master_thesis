@@ -8,7 +8,7 @@ import torch
 
 def _metric_fixed_point_fast(cost_matrix, gamma, eps=1e-7):
     """Dynamic programming for calculating PSM."""
-    d = np.zeros_like(cost_matrix)
+    d = torch.zeros_like(cost_matrix)
 
     def operator(d_cur):
         d_new = 1 * cost_matrix
@@ -20,7 +20,7 @@ def _metric_fixed_point_fast(cost_matrix, gamma, eps=1e-7):
 
     while True:
         d_new = operator(d)
-        if np.sum(np.abs(d - d_new)) < eps:
+        if torch.sum(torch.abs(d - d_new)) < eps:
             break
         else:
             d = d_new[:]
@@ -29,8 +29,8 @@ def _metric_fixed_point_fast(cost_matrix, gamma, eps=1e-7):
 
 def _metric_fixed_point_fast_fb(tv_matrix, gamma, eps=1e-7):
     """Dynamic programming for calculating PSM."""
-    d_bwrd = np.zeros_like(tv_matrix)
-    d_fwrd = np.zeros_like(tv_matrix)
+    d_bwrd = torch.zeros_like(tv_matrix)
+    d_fwrd = torch.zeros_like(tv_matrix)
 
     def operator_bwrd(d_cur):
         d_new = 1 * tv_matrix
@@ -51,7 +51,7 @@ def _metric_fixed_point_fast_fb(tv_matrix, gamma, eps=1e-7):
     while True:
         d_new_b = operator_bwrd(d_bwrd)
         d_new_f = operator_fwrd(d_fwrd)
-        if np.sum(np.abs(d_bwrd - d_new_b)) < eps and np.sum(np.abs(d_fwrd - d_new_f)) < eps:
+        if torch.sum(torch.abs(d_bwrd - d_new_b)) < eps and torch.sum(torch.abs(d_fwrd - d_new_f)) < eps:
             break
         else:
             d_bwrd = d_new_b[:]
@@ -69,16 +69,16 @@ def psm_f_fast(actions1, actions2, gamma=0.99):
     # matrix that holds the TV for each element of the two arrays
     # the entry i,j is 1 if the i-th entry of actions1 does NOT equal to the j-th entry of action 2
     action_cost = _calculate_action_cost_matrix(actions1, actions2)
-    return _metric_fixed_point_fast(np.array(action_cost), gamma=gamma)
+    return _metric_fixed_point_fast(action_cost, gamma=gamma)
 
 
 def psm_fb_fast(actions1, actions2, gamma=0.99):
     action_cost = _calculate_action_cost_matrix(actions1, actions2)
-    return _metric_fixed_point_fast_fb(np.array(action_cost), gamma=gamma)
+    return _metric_fixed_point_fast_fb(action_cost, gamma=gamma)
 
 
 def psm_default(x_arr, y_arr, gamma=0.99):
-    storage = np.full(shape=(len(x_arr), len(y_arr)), fill_value=-1.0)
+    storage = torch.full(size=(len(x_arr), len(y_arr)), fill_value=-1.0).to(x_arr.device)
 
     def psm_dyn(x_idx, y_idx):
         tv = 0. if x_arr[x_idx] == y_arr[y_idx] else 1.
@@ -99,8 +99,8 @@ def psm_default(x_arr, y_arr, gamma=0.99):
 
 def psm_fb(x_arr, y_arr, gamma_forward=0.99, gamma_backward=0.99):
     """ PSM Forward Backward"""
-    storage_fwrd = np.full(shape=(len(x_arr), len(y_arr)), fill_value=-1.0)
-    storage_bwrd = np.full(shape=(len(x_arr), len(y_arr)), fill_value=-1.0)
+    storage_fwrd = torch.full(size=(len(x_arr), len(y_arr)), fill_value=-1.0).to(x_arr.device)
+    storage_bwrd = torch.full(size=(len(x_arr), len(y_arr)), fill_value=-1.0).to(x_arr.device)
 
     def psm2_dyn_forward(x_idx, y_idx):
         tv = 0. if x_arr[x_idx] == y_arr[y_idx] else 1.
