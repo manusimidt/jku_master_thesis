@@ -83,11 +83,6 @@ def train(Mx: VanillaEnv, My: VanillaEnv, net, optim, alpha1, alpha2, beta, inv_
     metric_values = torch.tensor(psm_func(actionsX, actionsY)).to(device)
     alignment_loss = contrastive_loss(similarity_matrix, metric_values, inv_temp, beta)
 
-    # todo in the paper they have use other data for training bc (256 x 60 x 60 x 2) They probably do this because
-    #  they have a function that up-samples the training examples where the action has to jump
-    # states_y_logits = net.forward(statesY, contrastive=False)
-    # actionsY = actionsY.to(device).to(torch.int64)
-    # cross_entropy_loss = loss_bc(states_y_logits, actionsY)
     idx = random.sample(range(len(bc_data[0])), 256)
     bc_states, bc_actions = torch.tensor(bc_data[0][idx]).to(device), torch.tensor(bc_data[1][idx]).to(device)
     states_y_logits = net.forward(bc_states, contrastive=False)
@@ -149,7 +144,7 @@ def main(hyperparams: dict):
         'optimizer': optimizer.state_dict(),
         'info': {'conf': configurations}
     }
-    torch.save(state, 'ckpts/' + tb.log_dir.split('\\')[-1] + ".pth")
+    torch.save(state, hyperparams['train_dir'] + f'train_paper{curr_hyperparams["seed"]}')
 
 
 if __name__ == '__main__':

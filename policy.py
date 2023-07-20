@@ -1,12 +1,5 @@
 import torch.nn as nn
 
-
-# TODO network architecutre is way to big (seep page 20 of the paper)
-# conv1: filter: 8x8 stride:4 32x14x14
-# conv2: filter: 4x4 stride:2 64x6x6
-# conv3: filter: 3x3 stride:1 64x4x4
-# fc: 1024x256
-
 class ActorNet(nn.Module):
     def __init__(self):
         super(ActorNet, self).__init__()
@@ -21,6 +14,7 @@ class ActorNet(nn.Module):
             nn.ReLU(),
             nn.Linear(1024, 256),
             nn.ReLU(),
+            # nn.Dropout(p=.5)
         )
 
         # projection head (for the contrastive loss)

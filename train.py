@@ -85,6 +85,7 @@ def main(hyperparams: dict):
     set_seed(hyperparams['seed'], None)
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    # device =  'cpu'
     print("Training on ", device)
 
     psm_functions = {"f": psm.psm_f_fast, "fb": psm.psm_fb_fast}
