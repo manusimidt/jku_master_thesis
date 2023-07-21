@@ -1,17 +1,19 @@
 import argparse
 import copy
 import json
+import os
 from multiprocessing import Pool
+
+import pandas as pd
+
 import wandb
 import augmentations
-from common import set_seed
+from common import set_seed, get_date_str
 from env import TRAIN_CONFIGURATIONS, JumpingExpertBuffer
 from policy import ActorNet
 import torch
 from torch.optim import Optimizer, Adam
 import torch.nn as nn
-
-from rl.common.logger import CSVLogger, get_date_str
 from validate import validate
 
 
@@ -52,10 +54,15 @@ def evaluate(net: ActorNet, buffer: JumpingExpertBuffer, batch_size: int, optim_
     return actor_error.item()
 
 
-def main(model, hyperparams: dict, logger: CSVLogger):
+def main(hyperparams: dict, train_dir: str, experiment_id: str):
     set_seed(hyperparams['seed'], env=None)
-    wandb.init(project="bc-generalization", group=logger.filepath.split('/')[-2].replace('\\', ''), config=hyperparams)
 
+    run_name = 'train_bc-' + str(hyperparams['seed'])
+
+    wandb.init(project="bc-generalization", dir=train_dir, group=experiment_id, config=hyperparams)
+    losses = []
+
+    model = ActorNet()
     conf = list(TRAIN_CONFIGURATIONS[hyperparams['conf']])
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -74,10 +81,9 @@ def main(model, hyperparams: dict, logger: CSVLogger):
         test_loss = evaluate(model, buffer, hyperparams['batch_size'], optimizer, loss_func)
 
         print(f"Step {step} Train err: {train_loss:.6f}, Test err: {test_loss:.6f}")
-        wandb.log({
-            "Train loss": train_loss,
-            "Test loss": test_loss
-        }, step=step)
+        loss_dict = {"Train loss": train_loss, "Test loss": test_loss}
+        wandb.log(loss_dict, step=step)
+        losses.append(loss_dict)
 
         if step % 250 == 0:
             grid, train_perf, test_perf, total_perf, avg_jumps = \
@@ -93,18 +99,15 @@ def main(model, hyperparams: dict, logger: CSVLogger):
                 "Generalization viz": wandb.Image(grid.T)
             }, step=step)
 
-        logger.on_epoch_end(step, train_loss=train_loss, test_loss=test_loss)
-
     state = {
         'state_dict': model.state_dict(),
         'optimizer': optimizer.state_dict(),
         'info': {'conf': conf}
     }
-    torch.save(state, logger.filepath.replace('.csv', '.pth'))
+    torch.save(state, train_dir + os.sep + run_name + '.pth')
     # # save hyperparams
-    with open(logger.filepath.replace('.csv', '.json'), "w") as outfile:
-        json.dump(hyperparams, outfile, indent=2)
-    # return total_train_loss, total_test_loss
+    df = pd.DataFrame(losses)
+    df.to_csv(train_dir + os.sep + run_name + '.csv')
 
 
 if __name__ == '__main__':
@@ -124,7 +127,7 @@ if __name__ == '__main__':
 
     parser.add_argument("-lr", "--learning_rate", default=0.0004, type=float,
                         help="Learning rate for the optimizer")
-    parser.add_argument("-K", "--steps", default=2001, type=int,
+    parser.add_argument("-K", "--steps", default=201, type=int,
                         help="Number of training steps")
 
     parser.add_argument("-aug", "--augmentation", default="identity",
@@ -136,25 +139,28 @@ if __name__ == '__main__':
                              "spawn a new process for each seed")
 
     args = parser.parse_args()
-    hyperparams = copy.deepcopy(vars(args))
-    print(hyperparams)
-    date_str = get_date_str()
+    _hyperparams = copy.deepcopy(vars(args))
+    print(_hyperparams)
+    _experiment_id = get_date_str()
+
+    _train_dir = os.path.dirname(os.path.abspath(__file__)) + os.sep + 'experiments' + os.sep + _experiment_id
+    if not os.path.exists(_train_dir):
+        os.makedirs(_train_dir)
+
+    # save hyperparams
+    with open(_train_dir + os.sep + 'hyperparams.json', "w") as outfile:
+        json.dump(_hyperparams, outfile, indent=2)
 
     if len(args.seed) == 1:
         # convert the list to a single value
-        hyperparams['seed'] = hyperparams['seed'][0]
-        logger = CSVLogger(f'./experiments/{date_str}/', f'train_bc{hyperparams["seed"]}',
-                           columns=["train_loss", "test_loss"])
-        main(ActorNet(), hyperparams, logger)
+        _hyperparams['seed'] = _hyperparams['seed'][0]
+        main(_hyperparams, _train_dir, _experiment_id)
 
     else:
         params_arr = []
         for i in range(len(args.seed)):
-            curr_hyperparams = copy.deepcopy(hyperparams)
-            curr_hyperparams['seed'] = hyperparams['seed'][i]
-
-            logger = CSVLogger(f'./experiments/{date_str}/', f'train_bc{curr_hyperparams["seed"]}',
-                               columns=["train_loss", "test_loss"])
-            params_arr.append((ActorNet(), curr_hyperparams, logger))
+            curr_hyperparams = copy.deepcopy(_hyperparams)
+            curr_hyperparams['seed'] = _hyperparams['seed'][i]
+            params_arr.append((curr_hyperparams, _train_dir, _experiment_id))
         with Pool(3) as p:
             p.starmap(main, params_arr)

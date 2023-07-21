@@ -1,4 +1,6 @@
 import random
+import time
+
 import numpy as np
 import torch
 import matplotlib.pyplot as plt
@@ -44,6 +46,11 @@ def plot_evaluation_grid(grid, training_positions):
     fig.tight_layout()
     return fig
 
+def get_date_str() -> str:
+    """
+    Returns a date string in the form of YYMMDD-HHMMSS
+    """
+    return time.strftime("%y%m%d-%H%M%S")
 
 def map_conf_to_index(obstacle_pos, floor_height, confs: list) -> list:
     """
