@@ -1,20 +1,24 @@
 import argparse
 import copy
+import json
 import os
 from multiprocessing import Pool
 
+import pandas as pd
 import torch
 import torch.nn as nn
 
 import torch.optim as optim
+
+import augmentations
+import wandb
 from torch.utils.tensorboard import SummaryWriter
 
 import psm
-from common import dict2mdtable, set_seed
+from common import dict2mdtable, set_seed, get_date_str
 from env import TRAIN_CONFIGURATIONS, JumpingExpertBuffer
 
 from policy import ActorNet
-from rl.common.logger import get_date_str
 from validate import validate, generate_image
 
 
@@ -62,22 +66,30 @@ def cosine_similarity(a, b, eps=1e-8):
 
 
 @torch.enable_grad()
-def train(net, optim, alpha1, alpha2, beta, inv_temp, psm_func, buffer, loss_bc, batch_size):
+def train(net, optim, alpha1, alpha2, beta, inv_temp, psm_func, buffer, loss_bc, batch_size,
+          augmentation=augmentations.identity):
     net.train()
+    alignment_loss = cross_entropy_loss = torch.tensor(0)
 
-    statesX, actionsX = buffer.sample_trajectory()
-    statesY, actionsY = buffer.sample_trajectory()
+    if alpha1 != 0:
+        statesX, actionsX = buffer.sample_trajectory()
+        statesY, actionsY = buffer.sample_trajectory()
 
-    representation_1 = net.forward(statesX, contrastive=True)  # z_theta(x)
-    representation_2 = net.forward(statesY, contrastive=True)  # z_theta(y)
-    similarity_matrix = cosine_similarity(representation_1, representation_2)
+        statesX, statesY = augmentation(statesX), augmentation(statesY)
 
-    metric_values = psm_func(actionsX, actionsY)
-    alignment_loss = contrastive_loss(similarity_matrix, metric_values, inv_temp, beta)
+        representation_1 = net.forward(statesX, contrastive=True)  # z_theta(x)
+        representation_2 = net.forward(statesY, contrastive=True)  # z_theta(y)
+        similarity_matrix = cosine_similarity(representation_1, representation_2)
 
-    bc_states, bc_actions = buffer.sample(batch_size)
-    states_y_logits = net.forward(bc_states, contrastive=False)
-    cross_entropy_loss = loss_bc(states_y_logits, bc_actions.to(torch.int64))
+        metric_values = psm_func(actionsX, actionsY)
+        alignment_loss = contrastive_loss(similarity_matrix, metric_values, inv_temp, beta)
+
+    if alpha2 != 0:
+        bc_states, bc_actions = buffer.sample(batch_size)
+        bc_states = augmentation(bc_states)
+        # if alpha1 is zero, the first layers are not touched by PSE => train them with BC
+        states_y_logits = net.forward(bc_states, contrastive=False, full_network=alpha1 == 0)
+        cross_entropy_loss = loss_bc(states_y_logits, bc_actions.to(torch.int64))
 
     total_loss = alpha1 * alignment_loss + alpha2 * cross_entropy_loss
 
@@ -88,55 +100,76 @@ def train(net, optim, alpha1, alpha2, beta, inv_temp, psm_func, buffer, loss_bc,
     return total_loss.item(), alignment_loss.item(), cross_entropy_loss.item()
 
 
-def main(hyperparams: dict):
-    set_seed(hyperparams['seed'], None)
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    print("Training on ", device)
+@torch.no_grad()
+def evaluate(net: ActorNet, buffer: JumpingExpertBuffer, batch_size: int, loss_actor=nn.CrossEntropyLoss()):
+    """
+    Evaluates the network on a randomly sampled batch without applying any augmentation!
+    """
+    net.eval()
+
+    states, actions = buffer.sample(batch_size)
+
+    pred_action_logits = net.forward(states, contrastive=False)
+    actor_error = loss_actor(pred_action_logits, actions)
+
+    return actor_error.item()
+
+
+def main(hyperparams: dict, train_dir: str, experiment_id: str):
+    set_seed(hyperparams['seed'])
+
+    run_name = 'run-' + str(hyperparams['seed'])
+
+    wandb.init(project="bc-generalization", dir=train_dir, group=experiment_id, config=hyperparams)
+    losses = []
 
     psm_functions = {"f": psm.psm_f_fast, "fb": psm.psm_fb_fast}
     psm_func = psm_functions[hyperparams["psm"]]
-
     training_conf = list(TRAIN_CONFIGURATIONS[hyperparams["conf"]])
 
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    print("Training on ", device)
     net = ActorNet().to(device)
-
     optimizer = optim.Adam(net.parameters(), lr=hyperparams['learning_rate'])
     loss_bc = nn.CrossEntropyLoss()
 
-    tb = SummaryWriter(log_dir=hyperparams['train_dir'] + os.sep + str(hyperparams['seed']))
-    tb.add_text('info/args', dict2mdtable(hyperparams))
-
     buffer = JumpingExpertBuffer(training_conf, device, hyperparams['seed'])
 
-    for i in range(hyperparams['n_iterations']):
+    for step in range(hyperparams['n_iterations']):
         # Sample a pair of training MDPs
         info = train(net, optimizer, hyperparams['alpha1'], hyperparams['alpha2'], hyperparams['beta'],
-                     hyperparams['lambda'], psm_func,
-                     buffer, loss_bc, hyperparams['batch_size'])
+                     hyperparams['lambda'], psm_func, buffer, loss_bc, hyperparams['batch_size'],
+                     augmentations.aug_map[hyperparams['augmentation']])
 
         total_err, contrastive_err, cross_entropy_err = info
+        test_err = evaluate(net, buffer, hyperparams['batch_size'])
 
-        tb.add_scalar("loss/total", total_err, i)
-        tb.add_scalar("loss/contrastive", contrastive_err, i)
-        tb.add_scalar("loss/bc", cross_entropy_err, i)
+        loss_dict = {"Total loss": total_err, "Contrastive loss": contrastive_err, "BC loss": cross_entropy_err,
+                     "Test loss": test_err}
+        wandb.log(loss_dict, step=step)
+        losses.append(loss_dict)
 
-        print(f"Iteration {i}. Loss: {total_err:2.3f}", end='')
-        if i % 1000 == 0:
+        print(f"Iteration {step}. Loss: {total_err:2.3f}")
+        if step % 250 == 0:
             grid, train_perf, test_perf, total_perf, avg_jumps = validate(net, device, training_conf)
-            print(f", train perf: {train_perf:.3f}, test perf: {test_perf:.3f}, total perf:  {total_perf:.3f}")
-            tb.add_scalar("val/generalization", total_perf, i)
-            tb.add_scalar("val/train_gen", train_perf, i)
-            tb.add_scalar("val/test_gen", test_perf, i)
-            tb.add_scalar("val/avg_jumps", avg_jumps, i)
-            tb.add_image("val/fig", generate_image(grid, training_conf), i, dataformats="HWC")
-        else:
-            print("")
+            print(
+                f"Validation: train perf: {train_perf:.3f}, test perf: {test_perf:.3f}, total perf:  {total_perf:.3f}")
+            wandb.log({
+                "Generalization perf. on train": train_perf,
+                "Generalization perf. on test": test_perf,
+                "Total Generalization perf.": total_perf,
+                "Average jumps per episode:": avg_jumps,
+                "Generalization viz": wandb.Image(grid.T)
+            }, step=step)
     state = {
         'state_dict': net.state_dict(),
         'optimizer': optimizer.state_dict(),
         'info': {'conf': training_conf}
     }
-    torch.save(state, hyperparams['train_dir'] + f'train_paper{hyperparams["seed"]}')
+    torch.save(state, train_dir + os.sep + run_name + '.pth')
+    # # save hyperparams
+    df = pd.DataFrame(losses)
+    df.to_csv(train_dir + os.sep + run_name + '.csv')
 
 
 if __name__ == '__main__':
@@ -155,8 +188,6 @@ if __name__ == '__main__':
 
     parser.add_argument("-bs", "--batch_size", default=256, type=int,
                         help="Size of one Minibatch")
-    parser.add_argument("-bc", "--batch_count", default=10, type=int,
-                        help="Number of batches. BC will be trained on batch_size x batch_count samples")
 
     parser.add_argument("--balanced", default=True, type=bool, action=argparse.BooleanOptionalAction,
                         help="If true, the algorithm will be trained on a balanced dataset (1/3 action 1, 2/3 action 0 "
@@ -179,21 +210,37 @@ if __name__ == '__main__':
     parser.add_argument("-l", "--lambda", default=0.5, type=float,
                         help="Inverse temperature")
 
+    parser.add_argument("-aug", "--augmentation", default="identity",
+                        choices=list(augmentations.aug_map.keys()),
+                        help="The augmentation that should be applied to the states")
+
     parser.add_argument("-s", "--seed", default=[1], type=int, nargs='+',
                         help="The seed to train on. If multiple values are provided, the script will "
                              "spawn a new process for each seed")
 
     args = parser.parse_args()
-    hyperparams = copy.deepcopy(vars(args))
+    _hyperparams = copy.deepcopy(vars(args))
+    print(_hyperparams)
+    _experiment_id = get_date_str()
+
+    _train_dir = os.path.dirname(os.path.abspath(__file__)) + os.sep + 'experiments' + os.sep + _experiment_id
+    if not os.path.exists(_train_dir):
+        os.makedirs(_train_dir)
+
+    # save hyperparams
+    with open(_train_dir + os.sep + 'hyperparams.json', "w") as outfile:
+        json.dump(_hyperparams, outfile, indent=2)
+
     if len(args.seed) == 1:
         # convert the list to a single value
-        hyperparams['seed'] = hyperparams['seed'][0]
-        main(hyperparams)
+        _hyperparams['seed'] = _hyperparams['seed'][0]
+        main(_hyperparams, _train_dir, _experiment_id)
+
     else:
         params_arr = []
         for i in range(len(args.seed)):
-            curr_hyperparams = copy.deepcopy(hyperparams)
-            curr_hyperparams['seed'] = hyperparams['seed'][i]
-            params_arr.append((curr_hyperparams,))
-        with Pool(4) as p:
+            curr_hyperparams = copy.deepcopy(_hyperparams)
+            curr_hyperparams['seed'] = _hyperparams['seed'][i]
+            params_arr.append((curr_hyperparams, _train_dir, _experiment_id))
+        with Pool(3) as p:
             p.starmap(main, params_arr)

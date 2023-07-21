@@ -66,7 +66,7 @@ def map_conf_to_index(obstacle_pos, floor_height, confs: list) -> list:
     return res
 
 
-def set_seed(seed, env, force=False):
+def set_seed(seed, env=None, force=False):
     print("Setting seed ", seed)
     random.seed(seed)
     np.random.seed(seed)
