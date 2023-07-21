@@ -14,7 +14,7 @@ class ActorNet(nn.Module):
             nn.ReLU(),
             nn.Linear(1024, 256),
             nn.ReLU(),
-            # nn.Dropout(p=.5)
+            # nn.Dropout(p=.4),
         )
 
         # projection head (for the contrastive loss)
@@ -25,6 +25,7 @@ class ActorNet(nn.Module):
         # The downstream task (the actual actor)
         self.d = nn.Sequential(
             nn.Linear(256, 2),
+            # nn.Dropout(p=.4)
         )
 
     def disable_embedding_weights(self):

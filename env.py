@@ -53,7 +53,8 @@ class VanillaEnv(gym.Env):
         """
         super().__init__()
         # If no configuration was provided, use the default JumpingTask configuration
-        if configurations is None: configurations = [(30, 10), ]
+        if configurations is None:
+            configurations = [(30, 10), ]
         self.configurations = configurations
 
         # Jumping env has 2 possible actions
@@ -75,7 +76,7 @@ class VanillaEnv(gym.Env):
         obs, r, done, info = self.actualEnv.step(action)
         return np.expand_dims(obs, axis=0), float(r), done, info
 
-    def reset(self) -> np.ndarray:
+    def reset(self, **kwargs) -> np.ndarray:
         conf = self._sample_conf()
         obs = self.actualEnv._reset(obstacle_position=conf[0], floor_height=conf[1])
         return np.expand_dims(obs, axis=0)
@@ -124,11 +125,25 @@ class JumpingExpertBuffer:
 
                 obs = next_obs
                 step += 1
+
+            assert step == 56, "Non expert episode!"
         assert i == self.buffer_size, "Buffer not correctly filled up"
 
-    def sample(self, batch_size):
-        ind = self.rng.choice(range(self.buffer_size), size=batch_size, replace=False)
+    def sample(self, batch_size, replace=False) -> tuple:
+        """
+        Samples from the generated expert trajectories
+        :param batch_size:
+        :param replace: if replace is set to true, a batch can contain the same state twice
+        """
+        ind = self.rng.choice(range(self.buffer_size), size=batch_size, replace=replace)
         return self.states[ind], self.actions[ind]
+
+    def sample_trajectory(self) -> tuple:
+        """
+        Samples an entire expert trajectory
+        """
+        idx = self.rng.choice(range(len(self.training_pos))) * 56
+        return self.states[idx:idx + 56], self.actions[idx:idx + 56]
 
 
 def generate_expert_episode(env, numpy=True):
@@ -161,7 +176,8 @@ def generate_positive_pairs(envs: [VanillaEnv]):
     obstacle_pos_2 = env2.configurations[0][0]
     diff = obstacle_pos_1 - obstacle_pos_2
 
-    if diff > 0: return generate_positive_pairs([env2, env1])
+    if diff > 0:
+        return generate_positive_pairs([env2, env1])
 
     state1, action1 = generate_expert_episode(env1, numpy=True)
     state2, action2 = generate_expert_episode(env2, numpy=True)
@@ -178,6 +194,7 @@ def generate_positive_pairs(envs: [VanillaEnv]):
 if __name__ == '__main__':
     buffer = JumpingExpertBuffer(TRAIN_CONFIGURATIONS['wide_grid'], 'cuda', 3)
     buffer.sample(12)
+    buffer.sample_trajectory()
     _envs = [VanillaEnv()]
     for _env in _envs:
         _obs_arr = [_env.reset(), _env.step(0)[0], _env.step(0)[0], _env.step(0)[0], _env.step(1)[0]]

@@ -1,7 +1,6 @@
 import argparse
 import copy
 import os
-import random
 from multiprocessing import Pool
 
 import torch
@@ -10,28 +9,24 @@ import torch.optim as optim
 from torch.utils.tensorboard import SummaryWriter
 
 from common import dict2mdtable, set_seed
-from env import VanillaEnv, AugmentingEnv, TRAIN_CONFIGURATIONS, generate_expert_episode, generate_bc_data
+from env import TRAIN_CONFIGURATIONS, JumpingExpertBuffer
 
 from policy import ActorNet
 import torch.nn.functional as F
 import psm
 from rl.common.logger import get_date_str
-from validate import validate
+from validate import validate, generate_image
 
 
 @torch.enable_grad()
-def train(Mx: VanillaEnv, My: VanillaEnv, net, optim, alpha1, alpha2, beta, inv_temp, psm_func, bc_data, loss_bc):
-    device = next(net.parameters()).device
+def train(net, optim, alpha1, alpha2, beta, inv_temp, psm_func, buffer, loss_bc, batch_size):
     net.train()
 
-    statesX, actionsX = generate_expert_episode(Mx)
-    statesY, actionsY = generate_expert_episode(My)
-
-    statesX, actionsX = torch.tensor(statesX).to(device), torch.tensor(actionsX)
-    statesY, actionsY = torch.tensor(statesY).to(device), torch.tensor(actionsY)
+    statesX, actionsX = buffer.sample_trajectory()
+    statesY, actionsY = buffer.sample_trajectory()
 
     # calculate psm
-    psm_metric = torch.tensor(psm_func(actionsX, actionsY)).to(device)
+    psm_metric = psm_func(actionsX, actionsY)
     psm_metric = torch.exp(-psm_metric / beta)
     loss = 0
     avg_pos_sim, avg_neg_sim = 0, 0
@@ -67,8 +62,7 @@ def train(Mx: VanillaEnv, My: VanillaEnv, net, optim, alpha1, alpha2, beta, inv_
     contrastive_loss = (loss / statesY.shape[0])
 
     # Add BC loss
-    idx = random.sample(range(len(bc_data[0])), 64)
-    bc_states, bc_actions = torch.tensor(bc_data[0][idx]).to(device), torch.tensor(bc_data[1][idx]).to(device)
+    bc_states, bc_actions = buffer.sample(batch_size)
     states_y_logits = net.forward(bc_states, contrastive=False)
     cross_entropy_loss = loss_bc(states_y_logits, bc_actions.to(torch.int64))
 
@@ -91,10 +85,7 @@ def main(hyperparams: dict):
     psm_functions = {"f": psm.psm_f_fast, "fb": psm.psm_fb_fast}
     psm_func = psm_functions[hyperparams["psm"]]
 
-    configurations = TRAIN_CONFIGURATIONS[hyperparams["conf"]]
-    training_MDPs = []
-    for conf in configurations:
-        training_MDPs.append(VanillaEnv([conf]) if hyperparams['env'] == 'vanilla' else AugmentingEnv([conf]))
+    training_conf = list(TRAIN_CONFIGURATIONS[hyperparams["conf"]])
 
     net = ActorNet().to(device)
 
@@ -104,18 +95,14 @@ def main(hyperparams: dict):
     tb = SummaryWriter(log_dir=hyperparams['train_dir'] + os.sep + str(hyperparams['seed']))
     tb.add_text('info/args', dict2mdtable(hyperparams))
 
-    bc_data = generate_bc_data(training_MDPs, 4096 * 2, balanced=True)
+    buffer = JumpingExpertBuffer(training_conf, device, hyperparams['seed'])
 
     for i in range(hyperparams['n_iterations']):
-        # Sample a pair of training MDPs
-        Mx, My = random.sample(training_MDPs, 2)
-
-        info = train(Mx, My, net, optimizer, hyperparams['alpha1'], hyperparams['alpha2'], hyperparams['beta'],
+        info = train(net, optimizer, hyperparams['alpha1'], hyperparams['alpha2'], hyperparams['beta'],
                      hyperparams['lambda'], psm_func,
-                     bc_data, loss_bc)
+                     buffer, loss_bc, hyperparams['batch_size'])
 
         total_err, contrastive_err, cross_entropy_err, avg_pos_sim, avg_neg_sim = info
-        print(f"Iteration {i}. Loss: {total_err:2.3f}")
 
         tb.add_scalar("loss/total", total_err, i)
         tb.add_scalar("loss/contrastive", contrastive_err, i)
@@ -123,14 +110,18 @@ def main(hyperparams: dict):
         tb.add_scalar("debug/positive_similarity", avg_pos_sim, i)
         tb.add_scalar("debug/negative_similarity", avg_neg_sim, i)
 
+        print(f"Iteration {i}. Loss: {total_err:2.3f}", end='')
         if i % 250 == 0:
-            fig, perf = validate(net, device, configurations)
-            tb.add_scalar("val/generalization", perf, i)
-            tb.add_image("val/fig", fig, i, dataformats="HWC")
+            grid, train_perf, test_perf, total_perf = validate(net, device, training_conf)
+            print(f", train perf: {train_perf:.3f}, test perf: {test_perf:.3f}, total perf:  {total_perf:.3f}")
+            tb.add_scalar("val/generalization", total_perf, i)
+            tb.add_image("val/fig", generate_image(grid, training_conf), i, dataformats="HWC")
+        else:
+            print("")
     state = {
         'state_dict': net.state_dict(),
         'optimizer': optimizer.state_dict(),
-        'info': {'conf': configurations}
+        'info': {'conf': training_conf}
     }
     torch.save(state, 'ckpts/' + tb.log_dir.split('\\')[-1] + ".pth")
 
@@ -192,7 +183,6 @@ if __name__ == '__main__':
         for i in range(len(args.seed)):
             curr_hyperparams = copy.deepcopy(hyperparams)
             curr_hyperparams['seed'] = hyperparams['seed'][i]
-            params_arr.append((curr_hyperparams, ))
+            params_arr.append((curr_hyperparams,))
         with Pool(4) as p:
             p.starmap(main, params_arr)
-

@@ -12,6 +12,7 @@ __pycache__/
 /best-ckpts
 /runs
 experiments/
+wandb/
 # Distribution / packaging
 .Python
 build/

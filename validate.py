@@ -12,6 +12,7 @@ def validate(model: ActorNet, device, train_configurations):
 
     solved_train, solved_test = 0, 0
     failed_train, failed_test = 0, 0
+    jumps_per_episode = []
 
     for obs_pos_idx in range(len(obstacle_pos)):
         for floor_height_idx in range(len(floor_height)):
@@ -26,13 +27,15 @@ def validate(model: ActorNet, device, train_configurations):
             obs = env.reset()
             info = {}
             episode_return = 0
+            actions = []
             while not done:
                 action_logits = model.forward(torch.FloatTensor(obs).unsqueeze(0).to(device), contrastive=False)
                 action = torch.argmax(action_logits)
                 obs, rewards, done, info = env.step(action.item())
                 episode_return += rewards
+                actions.append(action.item())
             is_solved = not info['collision']
-
+            jumps_per_episode.append(np.sum(actions))
             if is_solved:
                 grid[obs_pos_idx][floor_height_idx] += 1
                 if is_train_conf:
@@ -48,8 +51,9 @@ def validate(model: ActorNet, device, train_configurations):
     train_perf = solved_train / (solved_train + failed_train)
     test_perf = solved_test / (solved_test + failed_test)
     total_perf = (solved_train + solved_test) / (solved_train + solved_test + failed_train + failed_test)
+    avg_jumps = np.mean(jumps_per_episode)
 
-    return grid, train_perf, test_perf, total_perf
+    return grid, train_perf, test_perf, total_perf, avg_jumps
 
 
 def generate_image(grid, train_configurations):

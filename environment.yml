@@ -5,3 +5,17 @@ channels:
   - defaults
 dependencies:
   - python=3.9.7
+  - pip
+  - pandas
+  - numpy
+  - scipy
+  - matplotlib
+  - pytorch=1.11
+  - torchvision
+  - cudatoolkit=11.3
+  - pip:
+      - gym
+      - pygame
+      - git+https://github.com/Maluuba/jumping-task.git#subdirectory=gym-jumping-task
+      - wandb
+      - kornia

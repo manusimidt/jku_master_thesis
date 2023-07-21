@@ -1,25 +1,21 @@
 import argparse
 import copy
 import os
-import random
 from multiprocessing import Pool
 
 import torch
-import time
 import torch.nn as nn
 
 import torch.optim as optim
 from torch.utils.tensorboard import SummaryWriter
-import torch.nn.functional as F
 
-import env
 import psm
 from common import dict2mdtable, set_seed
-from env import VanillaEnv, AugmentingEnv, TRAIN_CONFIGURATIONS, generate_expert_episode
+from env import TRAIN_CONFIGURATIONS, JumpingExpertBuffer
 
 from policy import ActorNet
 from rl.common.logger import get_date_str
-from validate import validate
+from validate import validate, generate_image
 
 
 def contrastive_loss(similarity_matrix, metric_values, temperature=1.0, beta=1.0):
@@ -66,25 +62,20 @@ def cosine_similarity(a, b, eps=1e-8):
 
 
 @torch.enable_grad()
-def train(Mx: VanillaEnv, My: VanillaEnv, net, optim, alpha1, alpha2, beta, inv_temp, psm_func, bc_data, loss_bc):
-    device = next(net.parameters()).device
+def train(net, optim, alpha1, alpha2, beta, inv_temp, psm_func, buffer, loss_bc, batch_size):
     net.train()
 
-    statesX, actionsX = generate_expert_episode(Mx)
-    statesY, actionsY = generate_expert_episode(My)
-
-    statesX, actionsX = torch.tensor(statesX).to(device), torch.tensor(actionsX)
-    statesY, actionsY = torch.tensor(statesY).to(device), torch.tensor(actionsY)
+    statesX, actionsX = buffer.sample_trajectory()
+    statesY, actionsY = buffer.sample_trajectory()
 
     representation_1 = net.forward(statesX, contrastive=True)  # z_theta(x)
     representation_2 = net.forward(statesY, contrastive=True)  # z_theta(y)
     similarity_matrix = cosine_similarity(representation_1, representation_2)
 
-    metric_values = torch.tensor(psm_func(actionsX, actionsY)).to(device)
+    metric_values = psm_func(actionsX, actionsY)
     alignment_loss = contrastive_loss(similarity_matrix, metric_values, inv_temp, beta)
 
-    idx = random.sample(range(len(bc_data[0])), 256)
-    bc_states, bc_actions = torch.tensor(bc_data[0][idx]).to(device), torch.tensor(bc_data[1][idx]).to(device)
+    bc_states, bc_actions = buffer.sample(batch_size)
     states_y_logits = net.forward(bc_states, contrastive=False)
     cross_entropy_loss = loss_bc(states_y_logits, bc_actions.to(torch.int64))
 
@@ -93,22 +84,19 @@ def train(Mx: VanillaEnv, My: VanillaEnv, net, optim, alpha1, alpha2, beta, inv_
     optim.zero_grad()
     total_loss.backward()
     optim.step()
+
     return total_loss.item(), alignment_loss.item(), cross_entropy_loss.item()
 
 
 def main(hyperparams: dict):
     set_seed(hyperparams['seed'], None)
-
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print("Training on ", device)
 
     psm_functions = {"f": psm.psm_f_fast, "fb": psm.psm_fb_fast}
     psm_func = psm_functions[hyperparams["psm"]]
 
-    configurations = TRAIN_CONFIGURATIONS[hyperparams["conf"]]
-    training_MDPs = []
-    for conf in configurations:
-        training_MDPs.append(VanillaEnv([conf]) if hyperparams['env'] == 'vanilla' else AugmentingEnv([conf]))
+    training_conf = list(TRAIN_CONFIGURATIONS[hyperparams["conf"]])
 
     net = ActorNet().to(device)
 
@@ -118,33 +106,37 @@ def main(hyperparams: dict):
     tb = SummaryWriter(log_dir=hyperparams['train_dir'] + os.sep + str(hyperparams['seed']))
     tb.add_text('info/args', dict2mdtable(hyperparams))
 
-    bc_data = env.generate_bc_data(training_MDPs, 4096 * 8, balanced=False)
+    buffer = JumpingExpertBuffer(training_conf, device, hyperparams['seed'])
 
     for i in range(hyperparams['n_iterations']):
         # Sample a pair of training MDPs
-        Mx, My = random.sample(training_MDPs, 2)
-        info = train(Mx, My, net, optimizer, hyperparams['alpha1'], hyperparams['alpha2'], hyperparams['beta'],
+        info = train(net, optimizer, hyperparams['alpha1'], hyperparams['alpha2'], hyperparams['beta'],
                      hyperparams['lambda'], psm_func,
-                     bc_data, loss_bc)
+                     buffer, loss_bc, hyperparams['batch_size'])
 
         total_err, contrastive_err, cross_entropy_err = info
-        print(f"Iteration {i}. Loss: {total_err:.3f}")
 
         tb.add_scalar("loss/total", total_err, i)
         tb.add_scalar("loss/contrastive", contrastive_err, i)
         tb.add_scalar("loss/bc", cross_entropy_err, i)
 
+        print(f"Iteration {i}. Loss: {total_err:2.3f}", end='')
         if i % 1000 == 0:
-            fig, perf = validate(net, device, configurations)
-            tb.add_scalar("val/generalization", perf, i)
-            tb.add_image("val/fig", fig, i, dataformats="HWC")
-
+            grid, train_perf, test_perf, total_perf, avg_jumps = validate(net, device, training_conf)
+            print(f", train perf: {train_perf:.3f}, test perf: {test_perf:.3f}, total perf:  {total_perf:.3f}")
+            tb.add_scalar("val/generalization", total_perf, i)
+            tb.add_scalar("val/train_gen", train_perf, i)
+            tb.add_scalar("val/test_gen", test_perf, i)
+            tb.add_scalar("val/avg_jumps", avg_jumps, i)
+            tb.add_image("val/fig", generate_image(grid, training_conf), i, dataformats="HWC")
+        else:
+            print("")
     state = {
         'state_dict': net.state_dict(),
         'optimizer': optimizer.state_dict(),
-        'info': {'conf': configurations}
+        'info': {'conf': training_conf}
     }
-    torch.save(state, hyperparams['train_dir'] + f'train_paper{curr_hyperparams["seed"]}')
+    torch.save(state, hyperparams['train_dir'] + f'train_paper{hyperparams["seed"]}')
 
 
 if __name__ == '__main__':
@@ -155,8 +147,6 @@ if __name__ == '__main__':
     parser.add_argument("--train_dir", default=f'./experiments/{get_date_str()}/',
                         help="The directory to store the results from this run into")
 
-    parser.add_argument("-e", "--env", choices=["vanilla", "random"], default="vanilla",
-                        help="The environment to train on")
     parser.add_argument("-c", "--conf", choices=["narrow_grid", "wide_grid"], default="wide_grid",
                         help="The environment configuration to train on")
 

@@ -2,19 +2,14 @@ import argparse
 import copy
 import json
 from multiprocessing import Pool
-
-import matplotlib.pyplot as plt
-import numpy as np
-
+import wandb
 import augmentations
-from common import set_seed, plot_evaluation_grid, map_conf_to_index
-from env import VanillaEnv, TRAIN_CONFIGURATIONS, generate_bc_dataset, AugmentingEnv, JumpingExpertBuffer, obstacle_pos, \
-    floor_height
+from common import set_seed
+from env import TRAIN_CONFIGURATIONS, JumpingExpertBuffer
 from policy import ActorNet
 import torch
 from torch.optim import Optimizer, Adam
 import torch.nn as nn
-from torch.utils.data import DataLoader
 
 from rl.common.logger import CSVLogger, get_date_str
 from validate import validate
@@ -59,6 +54,8 @@ def evaluate(net: ActorNet, buffer: JumpingExpertBuffer, batch_size: int, optim_
 
 def main(model, hyperparams: dict, logger: CSVLogger):
     set_seed(hyperparams['seed'], env=None)
+    wandb.init(project="bc-generalization", group=logger.filepath.split('/')[-2].replace('\\', ''), config=hyperparams)
+
     conf = list(TRAIN_CONFIGURATIONS[hyperparams['conf']])
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -76,13 +73,25 @@ def main(model, hyperparams: dict, logger: CSVLogger):
                            augmentation=augmentations.aug_map[hyperparams['augmentation']])
         test_loss = evaluate(model, buffer, hyperparams['batch_size'], optimizer, loss_func)
 
-        print(f"Step {step} Train err: {train_loss:.6f}, Test err: {test_loss:.6f}", end='')
+        print(f"Step {step} Train err: {train_loss:.6f}, Test err: {test_loss:.6f}")
+        wandb.log({
+            "Train loss": train_loss,
+            "Test loss": test_loss
+        }, step=step)
 
-        if step % 1000 == 0:
-            grid, train_perf, test_perf, total_perf = validate(model, device, TRAIN_CONFIGURATIONS[hyperparams['conf']])
-            print(f", train perf: {train_perf:.3f}, test perf: {test_perf:.3f}, total perf:  {total_perf:.3f}")
-        else:
-            print("")
+        if step % 250 == 0:
+            grid, train_perf, test_perf, total_perf, avg_jumps = \
+                validate(model, device, TRAIN_CONFIGURATIONS[hyperparams['conf']])
+            print(
+                f"Validation: train perf: {train_perf:.3f}, test perf: {test_perf:.3f}, total perf:  {total_perf:.3f}")
+
+            wandb.log({
+                "Generalization perf. on train": train_perf,
+                "Generalization perf. on test": test_perf,
+                "Total Generalization perf.": total_perf,
+                "Average jumps per episode:": avg_jumps,
+                "Generalization viz": wandb.Image(grid.T)
+            }, step=step)
 
         logger.on_epoch_end(step, train_loss=train_loss, test_loss=test_loss)
 
@@ -101,8 +110,6 @@ def main(model, hyperparams: dict, logger: CSVLogger):
 if __name__ == '__main__':
     set_seed(123, None)  # Base seed
     parser = argparse.ArgumentParser()
-    parser.add_argument("-e", "--env", choices=["vanilla", "random"], default="random",
-                        help="The environment to train on")
     parser.add_argument("-c", "--conf", choices=["narrow_grid", "wide_grid"], default="wide_grid",
                         help="The environment configuration to train on")
 
@@ -131,10 +138,12 @@ if __name__ == '__main__':
     args = parser.parse_args()
     hyperparams = copy.deepcopy(vars(args))
     print(hyperparams)
+    date_str = get_date_str()
+
     if len(args.seed) == 1:
         # convert the list to a single value
         hyperparams['seed'] = hyperparams['seed'][0]
-        logger = CSVLogger(f'./experiments/{get_date_str()}/', f'train_bc{hyperparams["seed"]}',
+        logger = CSVLogger(f'./experiments/{date_str}/', f'train_bc{hyperparams["seed"]}',
                            columns=["train_loss", "test_loss"])
         main(ActorNet(), hyperparams, logger)
 
@@ -144,7 +153,7 @@ if __name__ == '__main__':
             curr_hyperparams = copy.deepcopy(hyperparams)
             curr_hyperparams['seed'] = hyperparams['seed'][i]
 
-            logger = CSVLogger(f'./experiments/{get_date_str()}/', f'train_bc{curr_hyperparams["seed"]}',
+            logger = CSVLogger(f'./experiments/{date_str}/', f'train_bc{curr_hyperparams["seed"]}',
                                columns=["train_loss", "test_loss"])
             params_arr.append((ActorNet(), curr_hyperparams, logger))
         with Pool(3) as p:
