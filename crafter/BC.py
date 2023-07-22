@@ -5,7 +5,7 @@ import torch.optim as optim
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
 
-from env import VanillaEnv
+from jumping.env import VanillaEnv
 from rl.ppo.policies import ActorCriticNet
 from rl.ppo.ppo import PPO
 

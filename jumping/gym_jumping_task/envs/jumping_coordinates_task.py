@@ -30,7 +30,7 @@ from __future__ import division
 from __future__ import print_function
 
 from gym import spaces
-from gym_jumping_task.envs import jumping_task
+from jumping.gym_jumping_task.envs import jumping_task
 import numpy as np
 
 LEFT = jumping_task.LEFT

@@ -12,14 +12,13 @@ import torch.optim as optim
 
 import augmentations
 import wandb
-from torch.utils.tensorboard import SummaryWriter
 
 import psm
-from common import dict2mdtable, set_seed, get_date_str
+from common import set_seed, get_date_str
 from env import TRAIN_CONFIGURATIONS, JumpingExpertBuffer
 
 from policy import ActorNet
-from validate import validate, generate_image
+from validate import validate
 
 
 def contrastive_loss(similarity_matrix, metric_values, temperature=1.0, beta=1.0):

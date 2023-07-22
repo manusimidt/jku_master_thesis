@@ -11,7 +11,7 @@ __pycache__/
 /ckpts-final
 /best-ckpts
 /runs
-experiments/
+jumping/experiments/
 wandb/
 # Distribution / packaging
 .Python
@@ -137,7 +137,3 @@ dmypy.json
 
 
 .idea
-/tensorboard
-/tensorboard2
-/tensorboard3
-/tensorboard-final

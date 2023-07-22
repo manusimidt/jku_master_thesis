@@ -25,8 +25,8 @@
 """Tests for jumping task envs."""
 
 import gym
-from gym_jumping_task import COLORS
-from gym_jumping_task import registry
+from jumping.gym_jumping_task import COLORS
+from jumping.gym_jumping_task import registry
 import numpy as np
 import pytest
 
