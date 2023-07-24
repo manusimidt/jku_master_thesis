@@ -2,7 +2,7 @@ from torch import optim
 from rl.common.logger import ConsoleLogger, TensorboardLogger, Tracker
 from rl.ppo.policies import ActorCriticNet
 from rl.ppo.ppo import PPO
-from crafter.env import VanillaEnv
+from crafter_rl.env import VanillaEnv
 
 env = VanillaEnv()
 
