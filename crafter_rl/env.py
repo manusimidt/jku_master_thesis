@@ -15,7 +15,7 @@ from torchvision.transforms.functional import InterpolationMode
 class VanillaEnv(gym.Env):
     metadata = {"render.modes": ["human"]}
 
-    def __init__(self, rendering=False):
+    def __init__(self, seed):
         super().__init__()
 
         self.num_actions = 17
@@ -23,7 +23,7 @@ class VanillaEnv(gym.Env):
         self.observation_space = spaces.Box(low=0, high=1,
                                             shape=(3, 64, 64), dtype=np.float32)
         self.actualEnv = crafter.Recorder(
-            gym.make('CrafterReward-v1'),
+            crafter.Env(seed=seed),
             './logdir',
             save_stats=True,
             save_video=False,

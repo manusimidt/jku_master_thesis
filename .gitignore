@@ -8,6 +8,7 @@ __pycache__/
 
 /crafter_rl/dataset
 /crafter_rl/logdir
+/crafter_rl/experiments
 /ckpts
 /ckpts-final
 /best-ckpts

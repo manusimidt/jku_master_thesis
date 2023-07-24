@@ -1,116 +1,239 @@
-import numpy as np
+import argparse
+import copy
+import json
 import os
+from multiprocessing import Pool
+
+import pandas as pd
 import torch
-import torch.optim as optim
 import torch.nn as nn
-from torch.utils.data import Dataset, DataLoader
 
-from crafter_rl.env import VanillaEnv
+import torch.optim as optim
 
+import augmentations
+import wandb
 
-class BCDataset(Dataset):
-    def __init__(self, x, y):
-        super().__init__()
-        assert x.shape[0] == y.shape[0]
-        self.x = x
-        self.y = y
+import psm
+from common import set_seed, get_date_str
+from env import CrafterReplayBuffer
 
-    def __len__(self):
-        return self.y.shape[0]
-
-    def __getitem__(self, index):
-        return self.x[index], self.y[index]
+from policy import ActorNet
+from validate import validate
 
 
-def load_data(dataset_dir='./dataset/') -> tuple:
+def contrastive_loss(similarity_matrix, metric_values, temperature=1.0, beta=1.0):
     """
-    Loads the data and returns two torch.dataloader
+    Contrastive Loss with embedding similarity.
+    Taken from Agarwal.et.al. rewritten in pytorch
     """
-    states = actions = None
+    # z_\theta(X): embedding_1 = nn_model.representation(X)
+    # z_\theta(Y): embedding_2 = nn_model.representation(Y)
+    # similarity_matrix = cosine_similarity(embedding_1, embedding_2
+    # metric_values = PSM(X, Y)
+    metric_shape = metric_values.size()
+    similarity_matrix /= temperature
+    neg_logits1 = similarity_matrix
 
-    for file in os.listdir(dataset_dir):
-        with np.load(dataset_dir + file) as data:
-            normalized_states = np.array(np.moveaxis(data['image'], -1, -3) / 255, dtype=np.float32)
-            if states is None:
-                states = normalized_states
-                actions = data['action']
-            else:
-                states = np.concatenate([states, normalized_states], axis=0)
-                actions = np.concatenate([actions, data['action']], axis=0)
+    col_indices = torch.argmin(metric_values, dim=1)
+    pos_indices1 = torch.stack(
+        (torch.arange(metric_shape[0], dtype=torch.int32, device=col_indices.device), col_indices), dim=1)
+    pos_logits1 = similarity_matrix[pos_indices1[:, 0], pos_indices1[:, 1]]
 
-    X = torch.tensor(states)
-    y = torch.tensor(actions)
-    data = BCDataset(X, y)
-    train_set_length = int(len(data) * 0.8)
-    train_set, val_set = torch.utils.data.random_split(data, [train_set_length, len(data) - train_set_length])
-    train_loader: DataLoader = DataLoader(train_set, batch_size=64, shuffle=True)
-    test_loader: DataLoader = DataLoader(val_set, batch_size=64, shuffle=True)
-    return train_loader, test_loader
+    metric_values /= beta
+    similarity_measure = torch.exp(-metric_values)
+    pos_weights1 = -metric_values[pos_indices1[:, 0], pos_indices1[:, 1]]
+    pos_logits1 += pos_weights1
+    negative_weights = torch.log((1.0 - similarity_measure) + 1e-8)
+    negative_weights[pos_indices1[:, 0], pos_indices1[:, 1]] = pos_weights1
+
+    neg_logits1 += negative_weights
+
+    neg_logits1 = torch.logsumexp(neg_logits1, dim=1)
+    return torch.mean(neg_logits1 - pos_logits1)  # Equation 4
+
+
+def cosine_similarity(a, b, eps=1e-8):
+    """
+    Computes cosine similarity between all pairs of vectors in x and y
+    added eps for numerical stability
+    """
+    a_n, b_n = a.norm(dim=1)[:, None], b.norm(dim=1)[:, None]
+    a_norm = a / torch.max(a_n, eps * torch.ones_like(a_n))
+    b_norm = b / torch.max(b_n, eps * torch.ones_like(b_n))
+    sim_mt = torch.mm(a_norm, b_norm.transpose(0, 1))
+    return sim_mt
 
 
 @torch.enable_grad()
-def train(net: ActorCriticNet, dataLoader: DataLoader, optim_actor,
-          loss_actor=nn.CrossEntropyLoss()) -> tuple:
-    device = next(net.parameters()).device
+def train(net, optim, alpha1, alpha2, beta, inv_temp, psm_func, buffer, loss_bc, batch_size,
+          augmentation=augmentations.identity):
     net.train()
-    actor_errors = []
+    alignment_loss = cross_entropy_loss = torch.tensor(0)
 
-    for batch in dataLoader:
-        # X is the observation
-        # y contains the choosen action and the return estimate from the critic
-        X, y = batch[0].to(device), batch[1].to(device)
-        target_actions = y
+    if alpha1 != 0:
+        statesX, actionsX = buffer.sample_trajectory()
+        statesY, actionsY = buffer.sample_trajectory()
 
-        pred_action_logits = net.actor.forward(X)
+        statesX, statesY = augmentation(statesX), augmentation(statesY)
 
-        actor_error = loss_actor(pred_action_logits, target_actions.to(torch.int64))
+        representation_1 = net.forward(statesX, contrastive=True)  # z_theta(x)
+        representation_2 = net.forward(statesY, contrastive=True)  # z_theta(y)
+        similarity_matrix = cosine_similarity(representation_1, representation_2)
 
-        optim_actor.zero_grad()
-        actor_error.backward()
-        optim_actor.step()
+        metric_values = psm_func(actionsX, actionsY)
+        alignment_loss = contrastive_loss(similarity_matrix, metric_values, inv_temp, beta)
 
-        actor_errors.append(actor_error.item())
+    if alpha2 != 0:
+        bc_states, bc_actions = buffer.sample(batch_size)
+        bc_states = augmentation(bc_states)
+        # if alpha1 is zero, the first layers are not touched by PSE => train them with BC
+        states_y_logits = net.forward(bc_states, contrastive=False, full_network=alpha1 == 0)
+        cross_entropy_loss = loss_bc(states_y_logits, bc_actions.to(torch.int64))
 
-    return actor_errors
+    total_loss = alpha1 * alignment_loss + alpha2 * cross_entropy_loss
+
+    optim.zero_grad()
+    total_loss.backward()
+    optim.step()
+
+    return total_loss.item(), alignment_loss.item(), cross_entropy_loss.item()
 
 
 @torch.no_grad()
-def evaluate(net: ActorCriticNet, data_loader: DataLoader, loss_actor) -> tuple:
-    device = next(net.parameters()).device
+def evaluate(net: ActorNet, buffer: CrafterReplayBuffer, batch_size: int, loss_actor=nn.CrossEntropyLoss()):
+    """
+    Evaluates the network on a randomly sampled batch without applying any augmentation!
+    """
     net.eval()
-    actor_errors = []
 
-    for batch in data_loader:
-        X, target_actions = batch[0].to(device), batch[1].to(device)
+    states, actions = buffer.sample(batch_size)
 
-        pred_action_logits = net.actor.forward(X)
-        actor_errors.append(loss_actor(pred_action_logits, target_actions.to(torch.int64)).item())
+    pred_action_logits = net.forward(states, contrastive=False)
+    actor_error = loss_actor(pred_action_logits, actions)
 
-    return actor_errors
+    return actor_error.item()
 
 
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-print("Training on ", device)
+def main(hyperparams: dict, train_dir: str, experiment_id: str):
+    set_seed(hyperparams['seed'])
 
-lr = 0.001
-n_episodes = 10_000
-n_epochs = 25
+    run_name = 'run-' + str(hyperparams['seed'])
 
-env = VanillaEnv()
-trainloader, testloader = load_data()
+    wandb.init(project="crafter", dir=train_dir, group=experiment_id, config=hyperparams)
+    losses = []
 
-model = ActorCriticNet(obs_space=(3, 64, 64), action_space=env.num_actions, hidden_size=256).to(device)
-optim_actor = optim.Adam(model.actor.parameters(), lr=lr)
-loss_actor = nn.CrossEntropyLoss()
+    psm_functions = {"f": psm.psm_f_fast, "fb": psm.psm_fb_fast}
+    psm_func = psm_functions[hyperparams["psm"]]
 
-for epoch in range(n_epochs):
-    actor_errors = train(model, trainloader, optim_actor, loss_actor)
-    val_actor_errors = evaluate(model, testloader, loss_actor)
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    print("Training on ", device)
+    net = ActorNet().to(device)
+    optimizer = optim.Adam(net.parameters(), lr=hyperparams['learning_rate'])
+    loss_bc = nn.CrossEntropyLoss()
 
-    print(
-        f"""Epoch {epoch} Train errors: Actor {np.mean(actor_errors):.3f}, Val errors: Actor {np.mean(val_actor_errors):.3f} """)
+    buffer = CrafterReplayBuffer(device, hyperparams['seed'], './dataset')
 
-optimizer = optim.Adam(model.parameters(), lr=0.001)
-ppo = PPO(model, env, optimizer)
+    for step in range(hyperparams['n_iterations']):
+        # Sample a pair of training MDPs
+        info = train(net, optimizer, hyperparams['alpha1'], hyperparams['alpha2'], hyperparams['beta'],
+                     hyperparams['lambda'], psm_func, buffer, loss_bc, hyperparams['batch_size'],
+                     augmentations.aug_map[hyperparams['augmentation']])
 
-ppo.save('./ckpts', 'BC test')
+        total_err, contrastive_err, cross_entropy_err = info
+        test_err = evaluate(net, buffer, hyperparams['batch_size'])
+
+        loss_dict = {"Total loss": total_err, "Contrastive loss": contrastive_err, "BC loss": cross_entropy_err,
+                     "Test loss": test_err}
+        wandb.log(loss_dict, step=step)
+        losses.append(loss_dict)
+
+        if step % 1000 == 0:
+            returns, steps, achievements, inventory = validate(net, device)
+            wandb.log({"Avg. Returns": returns, "Avg. Steps": steps}, step=step)
+            wandb.log({'ach/' + k: v for k, v in achievements.items()}, step=step)
+            wandb.log({'inv/' + k: v for k, v in inventory.items()}, step=step)
+
+        print(f"Iteration {step}. Loss: {total_err:2.3f}")
+
+    state = {
+        'state_dict': net.state_dict(),
+        'optimizer': optimizer.state_dict()
+    }
+    torch.save(state, train_dir + os.sep + run_name + '.pth')
+    # # save hyperparams
+    df = pd.DataFrame(losses)
+    df.to_csv(train_dir + os.sep + run_name + '.csv')
+
+
+if __name__ == '__main__':
+    set_seed(123, None)  # Base seed
+
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument("--train_dir", default=f'./experiments/{get_date_str()}/',
+                        help="The directory to store the results from this run into")
+
+    parser.add_argument("-c", "--conf", choices=["narrow_grid", "wide_grid"], default="wide_grid",
+                        help="The environment configuration to train on")
+
+    parser.add_argument("-psm", "--psm", choices=["f", "fb"], default="f",
+                        help="The PSM distance function to use (f=forward PSM, fb=forward-backward PSM)")
+
+    parser.add_argument("-bs", "--batch_size", default=256, type=int,
+                        help="Size of one Minibatch")
+
+    parser.add_argument("--balanced", default=True, type=bool, action=argparse.BooleanOptionalAction,
+                        help="If true, the algorithm will be trained on a balanced dataset (1/3 action 1, 2/3 action 0 "
+                             "examples)")
+
+    parser.add_argument("-lr", "--learning_rate", default=0.0026, type=float,
+                        help="Learning rate for the optimizer")
+    parser.add_argument("-K", "--n_iterations", default=80_000, type=int,
+                        help="Number of total training steps")
+
+    parser.add_argument("-a1", "--alpha1", default=0, type=float,
+                        help="Scaling factor for the alignment loss")
+
+    parser.add_argument("-a2", "--alpha2", default=1., type=float,
+                        help="Scaling factor for the BC loss")
+
+    parser.add_argument("-b", "--beta", default=1.0, type=float,
+                        help="Scaling factor for the PSM")
+
+    parser.add_argument("-l", "--lambda", default=0.5, type=float,
+                        help="Inverse temperature")
+
+    parser.add_argument("-aug", "--augmentation", default="identity",
+                        choices=list(augmentations.aug_map.keys()),
+                        help="The augmentation that should be applied to the states")
+
+    parser.add_argument("-s", "--seed", default=[1], type=int, nargs='+',
+                        help="The seed to train on. If multiple values are provided, the script will "
+                             "spawn a new process for each seed")
+
+    args = parser.parse_args()
+    _hyperparams = copy.deepcopy(vars(args))
+    print(_hyperparams)
+    _experiment_id = get_date_str()
+
+    _train_dir = os.path.dirname(os.path.abspath(__file__)) + os.sep + 'experiments' + os.sep + _experiment_id
+    if not os.path.exists(_train_dir):
+        os.makedirs(_train_dir)
+
+    # save hyperparams
+    with open(_train_dir + os.sep + 'hyperparams.json', "w") as outfile:
+        json.dump(_hyperparams, outfile, indent=2)
+
+    if len(args.seed) == 1:
+        # convert the list to a single value
+        _hyperparams['seed'] = _hyperparams['seed'][0]
+        main(_hyperparams, _train_dir, _experiment_id)
+
+    else:
+        params_arr = []
+        for i in range(len(args.seed)):
+            curr_hyperparams = copy.deepcopy(_hyperparams)
+            curr_hyperparams['seed'] = _hyperparams['seed'][i]
+            params_arr.append((curr_hyperparams, _train_dir, _experiment_id))
+        with Pool(3) as p:
+            p.starmap(main, params_arr)
