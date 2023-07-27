@@ -106,7 +106,7 @@ print(contrastive_loss(
 
 import torch
 import numpy as np
-from psm import psm_paper
+from jumping.psm import psm_paper
 
 
 def cosine_similarity(a, b, eps=1e-8):

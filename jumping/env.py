@@ -9,7 +9,7 @@ import numpy as np
 import torch
 from gym import spaces
 from typing import List
-from jumping.gym_jumping_task.envs import JumpTaskEnv
+from gym_jumping_task.envs import JumpTaskEnv
 
 n_obstacle_pos = 26  # how many obstacle position you want to try out (paper: 27, max: 30)
 n_floor_heights = 11  # how many floor heights you want to try out (paper: 11, max: 40)

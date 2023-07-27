@@ -13,7 +13,7 @@ import torch.optim as optim
 import augmentations
 import wandb
 
-import psm
+import jumping.psm as psm
 from common import set_seed, get_date_str
 from env import CrafterReplayBuffer
 
@@ -188,10 +188,10 @@ if __name__ == '__main__':
 
     parser.add_argument("-lr", "--learning_rate", default=0.0026, type=float,
                         help="Learning rate for the optimizer")
-    parser.add_argument("-K", "--n_iterations", default=80_000, type=int,
+    parser.add_argument("-K", "--n_iterations", default=300_000, type=int,
                         help="Number of total training steps")
 
-    parser.add_argument("-a1", "--alpha1", default=0, type=float,
+    parser.add_argument("-a1", "--alpha1", default=.1, type=float,
                         help="Scaling factor for the alignment loss")
 
     parser.add_argument("-a2", "--alpha2", default=1., type=float,

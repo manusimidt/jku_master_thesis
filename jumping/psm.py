@@ -1,8 +1,6 @@
 """
 Provides different PSMs
 """
-
-import numpy as np
 import torch
 
 
@@ -64,7 +62,7 @@ def _calculate_action_cost_matrix(actions_1, actions_2):
     return 1.0 - action_equality.float()
 
 
-def psm_f_fast(actions1, actions2, gamma=0.99):
+def psm_f_fast(actions1, actions2, gamma=0.99, window=1e9):
     """Taken from Agarwal et al."""
     # matrix that holds the TV for each element of the two arrays
     # the entry i,j is 1 if the i-th entry of actions1 does NOT equal to the j-th entry of action 2
@@ -72,70 +70,83 @@ def psm_f_fast(actions1, actions2, gamma=0.99):
     return _metric_fixed_point_fast(action_cost, gamma=gamma)
 
 
-def psm_fb_fast(actions1, actions2, gamma=0.99):
+def psm_fb_fast(actions1, actions2, gamma=0.99, window=1e9):
     action_cost = _calculate_action_cost_matrix(actions1, actions2)
     return _metric_fixed_point_fast_fb(action_cost, gamma=gamma)
 
 
-def psm_default(x_arr, y_arr, gamma=0.99):
+def psm_default(x_arr, y_arr, gamma=0.99, window=1e9):
     storage = torch.full(size=(len(x_arr), len(y_arr)), fill_value=-1.0).to(x_arr.device)
 
-    def psm_dyn(x_idx, y_idx):
+    def psm_dyn(x_idx, y_idx, curr_window):
         tv = 0. if x_arr[x_idx] == y_arr[y_idx] else 1.
-        if x_idx == len(x_arr) - 1 and y_idx == len(y_arr) - 1:
+        if (x_idx == len(x_arr) - 1 and y_idx == len(y_arr) - 1) or curr_window == 0:
             return tv
         else:
             next_x_idx = min(x_idx + 1, len(x_arr) - 1)
             next_y_idx = min(y_idx + 1, len(y_arr) - 1)
-            next_psm = psm_dyn(next_x_idx, next_y_idx) if storage[next_x_idx, next_y_idx] == -1 else storage[
-                next_x_idx, next_y_idx]
+            next_psm = psm_dyn(next_x_idx, next_y_idx, curr_window - 1) if storage[next_x_idx, next_y_idx] == -1 else \
+                storage[next_x_idx, next_y_idx]
             return tv + gamma * next_psm
 
     for i in range(len(x_arr)):
         for j in range(len(y_arr)):
-            storage[i, j] = psm_dyn(i, j)
+            storage[i, j] = psm_dyn(i, j, window)
     return storage
 
 
-def psm_fb(x_arr, y_arr, gamma_forward=0.99, gamma_backward=0.99):
+def psm_fb(x_arr, y_arr, gamma=0.99, window=1e9):
     """ PSM Forward Backward"""
     storage_fwrd = torch.full(size=(len(x_arr), len(y_arr)), fill_value=-1.0).to(x_arr.device)
     storage_bwrd = torch.full(size=(len(x_arr), len(y_arr)), fill_value=-1.0).to(x_arr.device)
 
-    def psm2_dyn_forward(x_idx, y_idx):
+    def psm2_dyn_forward(x_idx, y_idx, curr_window):
         tv = 0. if x_arr[x_idx] == y_arr[y_idx] else 1.
-        if x_idx == len(x_arr) - 1 and y_idx == len(y_arr) - 1:
+        if (x_idx == len(x_arr) - 1 and y_idx == len(y_arr) - 1) or curr_window == 0:
             return tv
         else:
             next_x_idx = min(x_idx + 1, len(x_arr) - 1)
             next_y_idx = min(y_idx + 1, len(y_arr) - 1)
 
-            next_psm = psm2_dyn_forward(next_x_idx, next_y_idx) if storage_fwrd[next_x_idx, next_y_idx] == -1 else \
-                storage_fwrd[next_x_idx, next_y_idx]
-            return tv + gamma_forward * next_psm
+            next_psm = psm2_dyn_forward(next_x_idx, next_y_idx, curr_window - 1) \
+                if storage_fwrd[next_x_idx, next_y_idx] == -1 else storage_fwrd[next_x_idx, next_y_idx]
+            return tv + gamma * next_psm
 
-    def psm2_dyn_backward(x_idx, y_idx):
+    def psm2_dyn_backward(x_idx, y_idx, curr_window):
         tv = 0. if x_arr[x_idx] == y_arr[y_idx] else 1.
-        if x_idx == 0 and y_idx == 0:
+        if (x_idx == 0 and y_idx == 0) or curr_window == 0:
             return tv
         else:
             past_x_idx = max(x_idx - 1, 0)
             past_y_idx = max(y_idx - 1, 0)
 
-            past_psm = psm2_dyn_backward(past_x_idx, past_y_idx) if storage_bwrd[past_x_idx, past_y_idx] == -1 else \
-                storage_bwrd[past_x_idx, past_y_idx]
-            return tv + gamma_backward * past_psm
+            past_psm = psm2_dyn_backward(past_x_idx, past_y_idx, curr_window - 1) \
+                if storage_bwrd[past_x_idx, past_y_idx] == -1 else storage_bwrd[past_x_idx, past_y_idx]
+            return tv + gamma * past_psm
 
     for i in range(len(x_arr)):
         for j in range(len(y_arr)):
-            storage_fwrd[i, j] = psm2_dyn_forward(i, j)
-            storage_bwrd[i, j] = psm2_dyn_backward(i, j)
+            storage_fwrd[i, j] = psm2_dyn_forward(i, j, window)
+            storage_bwrd[i, j] = psm2_dyn_backward(i, j, window)
     return storage_fwrd + storage_bwrd
 
 
 if __name__ == '__main__':
-    # try to understand efficient psm calculation
-    result = psm_f_fast(torch.tensor([0, 0, 0, 1, 0]), torch.tensor([0, 1, 0, 0, 0]))
-    print(result)
-    result = psm_fb_fast(torch.tensor([0, 0, 0, 1, 0]), torch.tensor([0, 1, 0, 0, 0]), gamma=0.8)
-    print(result)
+    Mx = torch.tensor([0, 0, 0, 1, 0])
+    My = torch.tensor([0, 1, 0, 0, 0])
+
+    result1 = psm_default(Mx, My, gamma=0.8)
+    print(result1)
+
+    result1 = psm_default(Mx, My, gamma=0.8, window=2)
+    print(result1)
+
+    exit(-1)
+    result2 = psm_f_fast(Mx, My, gamma=0.8, window=3)
+    assert torch.allclose(result1, result2)
+    print(result1)
+
+    result1 = psm_fb(Mx, My, gamma=0.8, window=3)
+    result2 = psm_fb_fast(Mx, My, gamma=0.8, window=3)
+    assert torch.allclose(result1, result2)
+    print(result1)
