@@ -10,11 +10,10 @@ import torch.nn as nn
 
 import torch.optim as optim
 
-import augmentations
 import wandb
 
 import jumping.psm as psm
-from common import set_seed, get_date_str
+from common import set_seed, get_date_str, augmentations
 from env import TRAIN_CONFIGURATIONS, JumpingExpertBuffer
 
 from policy import ActorNet

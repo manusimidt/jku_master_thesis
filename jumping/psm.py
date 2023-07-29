@@ -132,21 +132,40 @@ def psm_fb(x_arr, y_arr, gamma=0.99, window=1e9):
 
 
 if __name__ == '__main__':
+    import time
+
     Mx = torch.tensor([0, 0, 0, 1, 0])
     My = torch.tensor([0, 1, 0, 0, 0])
 
+    Mx = torch.randint(low=0, high=17, size=(64,))
+    My = torch.randint(low=0, high=17, size=(28,))
+
+    start_time = time.time()
     result1 = psm_default(Mx, My, gamma=0.8)
-    print(result1)
+    result1_time = time.time() - start_time
 
-    result1 = psm_default(Mx, My, gamma=0.8, window=2)
-    print(result1)
+    start_time = time.time()
+    result2 = psm_f_fast(Mx, My, gamma=0.8)
+    result2_time = time.time() - start_time
 
-    exit(-1)
-    result2 = psm_f_fast(Mx, My, gamma=0.8, window=3)
     assert torch.allclose(result1, result2)
     print(result1)
 
-    result1 = psm_fb(Mx, My, gamma=0.8, window=3)
-    result2 = psm_fb_fast(Mx, My, gamma=0.8, window=3)
-    assert torch.allclose(result1, result2)
-    print(result1)
+    start_time = time.time()
+    result3 = psm_fb(Mx, My, gamma=0.8)
+    result3_time = time.time() - start_time
+
+    start_time = time.time()
+    result4 = psm_fb_fast(Mx, My, gamma=0.8)
+    result4_time = time.time() - start_time
+
+    assert torch.allclose(result3, result4)
+    print(result2)
+
+    print("Absolute Timings")
+    print(f"PSE Forward Timings: {result1_time:.4f} sec,  {result2_time:.4f} sec")
+    print(f"PSE FB Timings: {result3_time:.4f} sec,  {result4_time:.4f} sec")
+
+    print(f"Relative Timings:")
+    print(f"PSE Forward Timings: {result1_time/Mx.size()[0]:.4f},  {result2_time/Mx.size()[0]:.4f}")
+    print(f"PSE FB Timings: {result3_time/Mx.size()[0]:.4f},  {result4_time/Mx.size()[0]:.4f}")

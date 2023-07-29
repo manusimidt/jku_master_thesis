@@ -23,7 +23,7 @@
 # SOFTWARE.
 """Jumping Tasks."""
 
-from jumping.gym_jumping_task.envs.jumping_colors_task import COLORS
-from jumping.gym_jumping_task.envs.jumping_colors_task import JumpTaskEnvWithColors
-from jumping.gym_jumping_task.envs.jumping_coordinates_task import JumpTaskEnvWithCoordinates
-from jumping.gym_jumping_task.envs.jumping_task import JumpTaskEnv
+from gym_jumping_task.envs.jumping_colors_task import COLORS
+from gym_jumping_task.envs.jumping_colors_task import JumpTaskEnvWithColors
+from gym_jumping_task.envs.jumping_coordinates_task import JumpTaskEnvWithCoordinates
+from gym_jumping_task.envs.jumping_task import JumpTaskEnv

@@ -135,10 +135,10 @@ if __name__ == '__main__':
     Mx = torch.tensor([0, 0, 0, 1, 0])
     My = torch.tensor([0, 1, 0, 0, 0])
 
-    result1 = psm_default(Mx, My, gamma=0.8)
+    result1 = psm_default(Mx, My, gamma=0.8, window=3)
     print(result1)
 
-    result1 = psm_default(Mx, My, gamma=0.8)
+    result1 = psm_default(Mx, My, gamma=0.8, window=3)
     print(result1)
 
     result2 = psm_f_fast(Mx, My, gamma=0.8)
