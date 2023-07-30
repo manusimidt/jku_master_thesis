@@ -12,7 +12,7 @@ import torch.optim as optim
 
 import wandb
 
-import jumping.psm as psm
+import common.psm as psm
 from common import set_seed, get_date_str, augmentations
 from env import TRAIN_CONFIGURATIONS, JumpingExpertBuffer
 

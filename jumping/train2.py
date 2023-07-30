@@ -13,7 +13,7 @@ from env import TRAIN_CONFIGURATIONS, JumpingExpertBuffer
 
 from policy import ActorNet
 import torch.nn.functional as F
-import jumping.psm as psm
+import common.psm as psm
 from rl.common.logger import get_date_str
 from validate import validate, generate_image
 
