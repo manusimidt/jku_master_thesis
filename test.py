@@ -106,7 +106,38 @@ print(contrastive_loss(
 
 import torch
 import numpy as np
-from common.psm import psm_paper
+from common.psm import psm_f_fast
+
+
+def contrastive_loss(similarity_matrix, metric_values, temperature=1.0):
+    """
+    Contrastive Loss with embedding similarity.
+    Taken from Agarwal.et.al. rewritten in pytorch
+    """
+    metric_shape = metric_values.size()
+    similarity_matrix /= temperature
+    neg_logits1, neg_logits2 = similarity_matrix, similarity_matrix
+
+    col_indices = torch.argmin(metric_values, dim=1)
+    pos_indices1 = torch.stack(
+        (torch.arange(metric_shape[0], dtype=torch.int32, device=col_indices.device), col_indices), dim=1)
+    # pos_logits1 = torch.gather(similarity_matrix, dim=-1, index=pos_indices1)
+    pos_logits1 = similarity_matrix[tuple(pos_indices1.t())]
+
+
+    row_indices = torch.argmin(metric_values, dim=0)
+    pos_indices2 = torch.stack(
+        (row_indices, torch.arange(metric_shape[1], dtype=torch.int32, device=col_indices.device)), dim=1)
+    # pos_logits2 = torch.gather(similarity_matrix, dim=0, index=pos_indices2)
+    pos_logits2 = similarity_matrix[tuple(pos_indices2.t())]
+    print(np.round(pos_logits2.numpy(), 3))
+
+    neg_logits1 = torch.logsumexp(neg_logits1, dim=1)
+    neg_logits2 = torch.logsumexp(neg_logits2, dim=0)
+
+    loss1 = torch.mean(neg_logits1 - pos_logits1)
+    loss2 = torch.mean(neg_logits2 - pos_logits2)
+    return loss1 + loss2
 
 
 def cosine_similarity(a, b, eps=1e-8):
@@ -121,48 +152,25 @@ def cosine_similarity(a, b, eps=1e-8):
     return sim_mt
 
 
-def contrastive_loss(similarity_matrix, metric_values, temperature=1.0, beta=1.0):
-    """Contrative Loss with embedding similarity."""
-    # z_\theta(X): embedding_1 = nn_model.representation(X)
-    # z_\theta(Y): embedding_2 = nn_model.representation(Y)
-    # similarity_matrix = cosine_similarity(embedding_1, embedding_2
-    # metric_values = PSM(X, Y)
-    metric_shape = metric_values.size()
-    similarity_matrix /= temperature
-    neg_logits1 = similarity_matrix
+# The embedding is two-dimensional, n_states x contrastive_loss_head size
+np.random.seed(6510894)
+e1 = np.random.randint(low=0, high=255, size=(56, 64)).astype(np.float32)
+e2 = np.random.randint(low=0, high=255, size=(56, 64)).astype(np.float32)
 
-    col_indices = torch.argmin(metric_values, dim=1)
-    pos_indices1 = torch.stack(
-        (torch.arange(metric_shape[0], dtype=torch.int32), col_indices), dim=1)
-    pos_logits1 = similarity_matrix[pos_indices1[:, 0], pos_indices1[:, 1]]
+# Dimension is (n_states,)
+a1 = np.random.randint(0, 8, size=(56,))
+a2 = np.random.randint(0, 8, size=(56,))
+a2[10:20] = a1[30:40]
 
-    metric_values /= beta
-    similarity_measure = torch.exp(-metric_values)
-    pos_weights1 = -metric_values[pos_indices1[:, 0], pos_indices1[:, 1]]
-    pos_logits1 += pos_weights1
-    negative_weights = torch.log((1.0 - similarity_measure) + 1e-8)
-    negative_weights[pos_indices1[:, 0], pos_indices1[:, 1]] = pos_weights1
-
-    neg_logits1 += negative_weights
-
-    neg_logits1 = torch.logsumexp(neg_logits1, dim=1)
-    return torch.mean(neg_logits1 - pos_logits1)  # Equation 4
-
-
-e1 = np.array([.7, .54, .345, .6, .4625, .423, .9876, .2, .3, .34, .134, 2], np.float64)
-e2 = np.array([.123, .56, .3, .3, 5.2, .1, .2763, .928, .786, .23, .436, 43], np.float64)
-
-a1 = np.array([0, 1, 0, 0])
-a2 = np.array([1, 0, 0, 0])
-
-e1 = torch.tensor(e1)
-e2 = torch.tensor(e2)
+e1, e2 = torch.from_numpy(e1), torch.from_numpy(e2)
+a1, a2 = torch.from_numpy(a1), torch.from_numpy(a2)
 
 sim_matrix = cosine_similarity(e1, e2)
-psm = psm_paper(a1, a2)
+
+psm = psm_f_fast(a1, a2, gamma=0.8)
 
 print(contrastive_loss(
     sim_matrix,
-    torch.tensor(psm),
-    1.
+    psm,
+    temperature=0.01,
 ))

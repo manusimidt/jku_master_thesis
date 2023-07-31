@@ -51,6 +51,36 @@ def contrastive_loss(similarity_matrix, metric_values, temperature=1.0, beta=1.0
     return torch.mean(neg_logits1 - pos_logits1)  # Equation 4
 
 
+def contrastive_loss2(similarity_matrix, metric_values, temperature=1.0):
+    """
+    Contrastive Loss with embedding similarity.
+    Taken from Agarwal.et.al. rewritten in pytorch
+    """
+    metric_shape = metric_values.size()
+    similarity_matrix /= temperature
+    neg_logits1, neg_logits2 = similarity_matrix, similarity_matrix
+
+    col_indices = torch.argmin(metric_values, dim=1)
+    pos_indices1 = torch.stack(
+        (torch.arange(metric_shape[0], dtype=torch.int32, device=col_indices.device), col_indices), dim=1)
+    # pos_logits1 = torch.gather(similarity_matrix, dim=-1, index=pos_indices1)
+    pos_logits1 = similarity_matrix[tuple(pos_indices1.t())]
+
+
+    row_indices = torch.argmin(metric_values, dim=0)
+    pos_indices2 = torch.stack(
+        (row_indices, torch.arange(metric_shape[1], dtype=torch.int32, device=col_indices.device)), dim=1)
+    # pos_logits2 = torch.gather(similarity_matrix, dim=0, index=pos_indices2)
+    pos_logits2 = similarity_matrix[tuple(pos_indices2.t())]
+
+    neg_logits1 = torch.logsumexp(neg_logits1, dim=1)
+    neg_logits2 = torch.logsumexp(neg_logits2, dim=0)
+
+    loss1 = torch.mean(neg_logits1 - pos_logits1)
+    loss2 = torch.mean(neg_logits2 - pos_logits2)
+    return loss1 + loss2
+
+
 def cosine_similarity(a, b, eps=1e-8):
     """
     Computes cosine similarity between all pairs of vectors in x and y
@@ -80,7 +110,7 @@ def train(net, optim, alpha1, alpha2, beta, inv_temp, psm_func, buffer, loss_bc,
         similarity_matrix = cosine_similarity(representation_1, representation_2)
 
         metric_values = psm_func(actionsX, actionsY)
-        alignment_loss = contrastive_loss(similarity_matrix, metric_values, inv_temp, beta)
+        alignment_loss = contrastive_loss2(similarity_matrix, metric_values, inv_temp)
 
     if alpha2 != 0:
         bc_states, bc_actions = buffer.sample(batch_size)
