@@ -131,6 +131,10 @@ def psm_fb(x_arr, y_arr, gamma=0.99, window=1e9):
     return storage_fwrd + storage_bwrd
 
 
+def dummy_psm(actions1, actions2):
+    return _calculate_action_cost_matrix(actions1, actions2).float()
+
+
 if __name__ == '__main__':
     import time
 
