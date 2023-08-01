@@ -31,6 +31,11 @@ TRAIN_CONFIGURATIONS = {
     }
 }
 
+
+def gen_rand_grid():
+    return set(itertools.product(np.random.choice(obstacle_pos, size=18), np.random.choice(floor_height, size=18)))
+
+
 POSSIBLE_CONFIGURATIONS = set(itertools.product(obstacle_pos, floor_height))
 
 for _key in TRAIN_CONFIGURATIONS:
