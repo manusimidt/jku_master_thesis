@@ -1,6 +1,33 @@
 import torch
 
 
+def contrastive_loss_explicit(similarity_matrix, metric_values, temperature=1.0, beta=1.0):
+    loss = 0
+    # convert the metric to a measure
+    psm_measure = torch.exp(-metric_values / beta)
+
+    # loop over each state Y
+    for state_idx in range(similarity_matrix.shape[1]):
+        best_match = torch.argmax(psm_measure[:, state_idx])
+
+        positive_sim = similarity_matrix[best_match, state_idx]
+        positive_psm = psm_measure[best_match, state_idx]
+        negative_sims = torch.cat(
+            (similarity_matrix[:best_match, state_idx], similarity_matrix[best_match + 1:, state_idx]),
+            dim=0)
+        negative_psms = torch.cat((
+            psm_measure[:best_match, state_idx], psm_measure[best_match + 1:, state_idx]),
+            dim=0)
+
+        nominator = positive_psm * torch.exp(temperature * positive_sim)
+
+        sum_term = torch.sum((1 - negative_psms) * torch.exp(temperature * negative_sims))
+
+        loss += -torch.log(nominator / (nominator + sum_term))
+
+    return loss / similarity_matrix.shape[0]
+
+
 def contrastive_loss_paper(similarity_matrix, metric_values, temperature=1.0, beta=1.0):
     """
     Contrastive Loss with embedding similarity.
@@ -75,3 +102,12 @@ def cosine_similarity(a, b, eps=1e-8):
     b_norm = b / torch.max(b_n, eps * torch.ones_like(b_n))
     sim_mt = torch.mm(a_norm, b_norm.transpose(0, 1))
     return sim_mt
+
+
+if __name__ == '__main__':
+    _sim_matrix = torch.normal(5, 2, size=(56, 56))
+    _psm_matrix = torch.rand(size=(56, 56))
+
+    print(contrastive_loss_explicit(_sim_matrix, _psm_matrix))
+    print(contrastive_loss_paper(_sim_matrix, _psm_matrix))
+    print(contrastive_loss_repository(_sim_matrix, _psm_matrix))

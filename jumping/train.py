@@ -18,11 +18,43 @@ from env import TRAIN_CONFIGURATIONS, JumpingExpertBuffer, gen_rand_grid
 
 from policy import ActorNet
 from validate import validate
-from common.training_helpers import cosine_similarity, contrastive_loss_paper, contrastive_loss_repository
+from common.training_helpers import cosine_similarity, contrastive_loss_paper, contrastive_loss_repository, \
+    contrastive_loss_explicit
+
+
+def log_sim(sim_matrix, metric_values):
+    # ind_x = torch.arange(0, metric_values.shape[0])
+    # ind_y = torch.arange(0, metric_values.shape[1])
+    # positive_pairs_x = metric_values.argmin(axis=0)
+    # positive_pairs_y = metric_values.argmin(axis=1)
+
+    # positive_sim_x = sim_matrix[ind_x, positive_pairs_x]
+    # positive_sim_y = sim_matrix[positive_pairs_y, ind_y]
+
+    # negative_sim_x = torch.cat((sim_matrix[ind_x, :positive_pairs_x], sim_matrix[ind_x, positive_pairs_x + 1:]))
+    # negative_sim_y = torch.cat((sim_matrix[:positive_pairs_y, ind_y], sim_matrix[positive_pairs_x + 1:, ind_y]))
+
+    # pos_sim = torch.mean(torch.cat((positive_sim_x, positive_sim_y)))
+    # neg_sim = torch.mean(torch.cat((negative_sim_x, negative_sim_y)))
+    # return pos_sim, neg_sim
+    total_pos_sim = 0
+    total_neg_sim = 0
+    for state_idx in range(sim_matrix.shape[1]):
+        best_match = torch.argmax(metric_values[:, state_idx])
+        total_pos_sim += sim_matrix[best_match, state_idx]
+        total_neg_sim += torch.mean(torch.cat(
+            (sim_matrix[:best_match, state_idx], sim_matrix[best_match + 1:, state_idx]),
+            dim=0))
+
+    wandb.log({
+        "Positive similarity": total_pos_sim / sim_matrix.shape[1],
+        "Negative similarity":  total_neg_sim / sim_matrix.shape[1]
+    })
+
 
 
 @torch.enable_grad()
-def train(net, optim, alpha1, alpha2, beta, inv_temp, psm_func, buffer, loss_bc, batch_size,
+def train(net, optim, alpha1, alpha2, beta, inv_temp, psm_func, loss_func, buffer, loss_bc, batch_size,
           augmentation=augmentations.identity):
     net.train()
     alignment_loss = cross_entropy_loss = torch.tensor(0)
@@ -38,7 +70,9 @@ def train(net, optim, alpha1, alpha2, beta, inv_temp, psm_func, buffer, loss_bc,
         similarity_matrix = cosine_similarity(representation_1, representation_2)
 
         metric_values = psm_func(actionsX, actionsY)
-        alignment_loss = contrastive_loss_paper(similarity_matrix, metric_values, inv_temp)
+        alignment_loss = loss_func(similarity_matrix, metric_values, inv_temp)
+
+        log_sim(cosine_similarity(representation_1, representation_2), metric_values)
 
     if alpha2 != 0:
         bc_states, bc_actions = buffer.sample(batch_size)
@@ -81,6 +115,10 @@ def main(hyperparams: dict, train_dir: str, experiment_id: str):
 
     psm_functions = {"f": psm.psm_f_fast, "fb": psm.psm_fb_fast}
     psm_func = psm_functions[hyperparams["psm"]]
+
+    loss_functions = {"paper": contrastive_loss_paper, "repository": contrastive_loss_repository,
+                      "explicit": contrastive_loss_explicit}
+    loss_func = loss_functions[hyperparams["loss"]]
     # psm_func = psm.dummy_psm
     if hyperparams["conf"] == "random_grid":
         training_conf = gen_rand_grid()
@@ -98,7 +136,7 @@ def main(hyperparams: dict, train_dir: str, experiment_id: str):
     for step in range(hyperparams['n_iterations']):
         # Sample a pair of training MDPs
         info = train(net, optimizer, hyperparams['alpha1'], hyperparams['alpha2'], hyperparams['beta'],
-                     hyperparams['lambda'], psm_func, buffer, loss_bc, hyperparams['batch_size'],
+                     hyperparams['lambda'], psm_func, loss_func, buffer, loss_bc, hyperparams['batch_size'],
                      augmentations.aug_map[hyperparams['augmentation']])
 
         total_err, contrastive_err, cross_entropy_err = info
@@ -177,6 +215,9 @@ if __name__ == '__main__':
     parser.add_argument("-s", "--seed", default=[1], type=int, nargs='+',
                         help="The seed to train on. If multiple values are provided, the script will "
                              "spawn a new process for each seed")
+
+    parser.add_argument("-loss", "--loss", choices=["paper", "repository", "explicit"], default="explicit",
+                        help="which loss to use")
 
     args = parser.parse_args()
     _hyperparams = copy.deepcopy(vars(args))
