@@ -16,20 +16,39 @@ import torch.nn.functional as F
 import common.psm as psm
 from common import get_date_str
 from validate import validate, generate_image
+from common.training_helpers import cosine_similarity
 
 
-@torch.enable_grad()
-def train(net, optim, alpha1, alpha2, beta, inv_temp, psm_func, buffer, loss_bc, batch_size):
-    net.train()
-
-    statesX, actionsX = buffer.sample_trajectory()
-    statesY, actionsY = buffer.sample_trajectory()
-
-    # calculate psm
-    psm_metric = psm_func(actionsX, actionsY)
-    psm_metric = torch.exp(-psm_metric / beta)
+def contrastive_loss_explicit(similarity_matrix, metric_values, temperature=1.0, beta=1.0):
     loss = 0
-    avg_pos_sim, avg_neg_sim = 0, 0
+    # loop over each state y
+    for state_idx in range(similarity_matrix.shape[0]):
+        # best_match = np.argmax(psm[state_idx])
+        best_match = torch.argmax(metric_values[:, state_idx])
+
+        positive_sim = similarity_matrix[best_match, state_idx]
+        positive_psm = metric_values[best_match, state_idx]
+        negative_sims = torch.cat(
+            (similarity_matrix[:best_match, state_idx], similarity_matrix[best_match + 1:, state_idx]),
+            dim=0)
+        negative_psms = torch.cat((
+            metric_values[:best_match, state_idx], metric_values[best_match + 1:, state_idx]),
+            dim=0)
+
+        nominator = positive_psm * torch.exp(temperature * positive_sim)
+
+        # s_\theta(x', y)
+
+        sum_term = torch.sum(
+            (1 - negative_psms) * torch.exp(temperature * negative_sims))
+
+        loss += -torch.log(nominator / (nominator + sum_term))
+
+    return loss / similarity_matrix.shape[0]
+
+
+def contrastive_loss_loop(net, statesX, statesY, psm_metric, inv_temp):
+    loss = 0
     # loop over each state x
     for state_idx in range(statesY.shape[0]):
         # best_match = np.argmax(psm[state_idx])
@@ -47,19 +66,40 @@ def train(net, optim, alpha1, alpha2, beta, inv_temp, psm_func, buffer, loss_bc,
 
         # this is s_\theta(x_y, y)
         positive_sim = F.cosine_similarity(positive_x_logits, target_logits, dim=0)
-        avg_pos_sim += positive_sim
+
         nominator = current_psm_values[best_match] * torch.exp(inv_temp * positive_sim)
 
         # s_\theta(x', y)
         negative_sim = F.cosine_similarity(negative_x_logits, target_logits, dim=1)
-        avg_neg_sim += torch.mean(negative_sim)
+
         psm_metric_negative = torch.cat((current_psm_values[:best_match], current_psm_values[best_match + 1:]), dim=0)
         sum_term = torch.sum(
             (1 - psm_metric_negative) * torch.exp(inv_temp * negative_sim))
 
         loss += -torch.log(nominator / (nominator + sum_term))
 
-    contrastive_loss = (loss / statesY.shape[0])
+    return loss / statesY.shape[0]
+
+
+@torch.enable_grad()
+def train(net, optim, alpha1, alpha2, beta, inv_temp, psm_func, buffer, loss_bc, batch_size):
+    net.train()
+
+    statesX, actionsX = buffer.sample_trajectory()
+    statesY, actionsY = buffer.sample_trajectory()
+
+    # calculate psm
+    psm_metric = psm_func(actionsX, actionsY)
+    psm_metric = torch.exp(-psm_metric / beta)
+    contrastive_loss = contrastive_loss_loop(net, statesX, statesY, psm_metric, inv_temp)
+
+    # region alternative loss
+    representation_1 = net.forward(statesX, contrastive=True)
+    representation_2 = net.forward(statesY, contrastive=True)
+    sim_matrix = cosine_similarity(representation_1, representation_2)
+    contrastive_loss2 = contrastive_loss_explicit(sim_matrix, psm_metric, inv_temp)
+    assert torch.allclose(contrastive_loss, contrastive_loss2)
+    # endregion alternative loss
 
     # Add BC loss
     bc_states, bc_actions = buffer.sample(batch_size)
@@ -70,9 +110,8 @@ def train(net, optim, alpha1, alpha2, beta, inv_temp, psm_func, buffer, loss_bc,
     optim.zero_grad()
     total_loss.backward()
     optim.step()
-    avg_pos_sim = (avg_pos_sim / statesY.shape[0]).item()
-    avg_neg_sim = (avg_neg_sim / statesY.shape[0]).item()
-    return total_loss.item(), contrastive_loss.item(), cross_entropy_loss.item(), avg_pos_sim, avg_neg_sim
+
+    return total_loss.item(), contrastive_loss.item(), cross_entropy_loss.item()
 
 
 def main(hyperparams: dict):
@@ -100,17 +139,17 @@ def main(hyperparams: dict):
                      hyperparams['lambda'], psm_func,
                      buffer, loss_bc, hyperparams['batch_size'])
 
-        total_err, contrastive_err, cross_entropy_err, avg_pos_sim, avg_neg_sim = info
+        total_err, contrastive_err, cross_entropy_err = info
 
         tb.add_scalar("loss/total", total_err, i)
         tb.add_scalar("loss/contrastive", contrastive_err, i)
         tb.add_scalar("loss/bc", cross_entropy_err, i)
-        tb.add_scalar("debug/positive_similarity", avg_pos_sim, i)
-        tb.add_scalar("debug/negative_similarity", avg_neg_sim, i)
+        # tb.add_scalar("debug/positive_similarity", avg_pos_sim, i)
+        # tb.add_scalar("debug/negative_similarity", avg_neg_sim, i)
 
         print(f"Iteration {i}. Loss: {total_err:2.3f}", end='')
         if i % 250 == 0:
-            grid, train_perf, test_perf, total_perf = validate(net, device, training_conf)
+            grid, train_perf, test_perf, total_perf, avg_jumps = validate(net, device, training_conf)
             print(f", train perf: {train_perf:.3f}, test perf: {test_perf:.3f}, total perf:  {total_perf:.3f}")
             tb.add_scalar("val/generalization", total_perf, i)
             tb.add_image("val/fig", generate_image(grid, training_conf), i, dataformats="HWC")

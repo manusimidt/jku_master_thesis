@@ -106,6 +106,9 @@ class JumpingExpertBuffer:
         self.states = torch.empty((self.buffer_size, 1, 60, 60), device=device, dtype=torch.float32)
         self.actions = torch.empty(self.buffer_size, device=device, dtype=torch.int64)
 
+        # Stores the indices of the jumping states/actions. For faster sampling
+        self.jump_idx = []
+
         self._populate()
 
     def _populate(self):
@@ -126,6 +129,7 @@ class JumpingExpertBuffer:
 
                 self.states[i] = torch.from_numpy(obs).to(self.device).unsqueeze(0)
                 self.actions[i] = action
+                if action == 1: self.jump_idx.append(i)
                 i += 1
 
                 obs = next_obs
@@ -134,13 +138,17 @@ class JumpingExpertBuffer:
             assert step == 56, "Non expert episode!"
         assert i == self.buffer_size, "Buffer not correctly filled up"
 
-    def sample(self, batch_size, replace=False) -> tuple:
+    def sample(self, batch_size, replace=False, upsample=False) -> tuple:
         """
         Samples from the generated expert trajectories
         :param batch_size:
         :param replace: if replace is set to true, a batch can contain the same state twice
         """
-        ind = self.rng.choice(range(self.buffer_size), size=batch_size, replace=replace)
+        if not upsample:
+            ind = self.rng.choice(range(self.buffer_size), size=batch_size, replace=replace)
+        else:
+            # TODO!
+            pass
         return self.states[ind], self.actions[ind]
 
     def sample_trajectory(self) -> tuple:

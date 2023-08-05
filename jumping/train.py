@@ -14,7 +14,7 @@ import wandb
 
 import common.psm as psm
 from common import set_seed, get_date_str, augmentations
-from env import TRAIN_CONFIGURATIONS, JumpingExpertBuffer
+from env import TRAIN_CONFIGURATIONS, JumpingExpertBuffer, gen_rand_grid
 
 from policy import ActorNet
 from validate import validate
@@ -81,7 +81,11 @@ def main(hyperparams: dict, train_dir: str, experiment_id: str):
 
     psm_functions = {"f": psm.psm_f_fast, "fb": psm.psm_fb_fast}
     psm_func = psm_functions[hyperparams["psm"]]
-    training_conf = list(TRAIN_CONFIGURATIONS[hyperparams["conf"]])
+    # psm_func = psm.dummy_psm
+    if hyperparams["conf"] == "random_grid":
+        training_conf = gen_rand_grid()
+    else:
+        training_conf = list(TRAIN_CONFIGURATIONS[hyperparams["conf"]])
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print("Training on ", device)
@@ -136,7 +140,7 @@ if __name__ == '__main__':
     parser.add_argument("--train_dir", default=f'./experiments/{get_date_str()}/',
                         help="The directory to store the results from this run into")
 
-    parser.add_argument("-c", "--conf", choices=["narrow_grid", "wide_grid"], default="wide_grid",
+    parser.add_argument("-c", "--conf", choices=["narrow_grid", "wide_grid", "random_grid"], default="wide_grid",
                         help="The environment configuration to train on")
 
     parser.add_argument("-psm", "--psm", choices=["f", "fb"], default="f",
