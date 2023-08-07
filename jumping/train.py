@@ -18,7 +18,8 @@ from env import TRAIN_CONFIGURATIONS, JumpingExpertBuffer, gen_rand_grid
 
 from policy import ActorNet
 from validate import validate
-from common.training_helpers import cosine_similarity, contrastive_loss_paper, contrastive_loss_repository, \
+from common.training_helpers import cosine_similarity, pairwise_distance, contrastive_loss_paper, \
+    contrastive_loss_repository, \
     contrastive_loss_explicit
 
 
@@ -48,9 +49,8 @@ def log_sim(sim_matrix, metric_values):
 
     wandb.log({
         "Positive similarity": total_pos_sim / sim_matrix.shape[1],
-        "Negative similarity":  total_neg_sim / sim_matrix.shape[1]
+        "Negative similarity": total_neg_sim / sim_matrix.shape[1]
     })
-
 
 
 @torch.enable_grad()
@@ -72,7 +72,7 @@ def train(net, optim, alpha1, alpha2, beta, inv_temp, psm_func, loss_func, buffe
         metric_values = psm_func(actionsX, actionsY)
         alignment_loss = loss_func(similarity_matrix, metric_values, inv_temp)
 
-        log_sim(cosine_similarity(representation_1, representation_2), metric_values)
+        # log_sim(cosine_similarity(representation_1, representation_2), metric_values)
 
     if alpha2 != 0:
         bc_states, bc_actions = buffer.sample(batch_size)
@@ -128,7 +128,9 @@ def main(hyperparams: dict, train_dir: str, experiment_id: str):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print("Training on ", device)
     net = ActorNet().to(device)
-    optimizer = optim.Adam(net.parameters(), lr=hyperparams['learning_rate'])
+    optimizer = optim.Adam(net.parameters(), lr=hyperparams['learning_rate'], weight_decay=hyperparams['weight_decay'])
+    lr_decay = optim.lr_scheduler.ExponentialLR(optimizer=optimizer, gamma=hyperparams['learning_decay'])
+
     loss_bc = nn.CrossEntropyLoss()
 
     buffer = JumpingExpertBuffer(training_conf, device, hyperparams['seed'])
@@ -143,12 +145,14 @@ def main(hyperparams: dict, train_dir: str, experiment_id: str):
         test_err = evaluate(net, buffer, hyperparams['batch_size'])
 
         loss_dict = {"Total loss": total_err, "Contrastive loss": contrastive_err, "BC loss": cross_entropy_err,
-                     "Test loss": test_err}
+                     "Test loss": test_err, "Learning rate": lr_decay.get_last_lr()[0]}
         wandb.log(loss_dict, step=step)
         losses.append(loss_dict)
+        if step % 10 == 0:
+            lr_decay.step()
 
         print(f"Iteration {step}. Loss: {total_err:2.3f}")
-        if step % 250 == 0:
+        if step % 80 == 0:
             grid, train_perf, test_perf, total_perf, avg_jumps = validate(net, device, training_conf)
             print(
                 f"Validation: train perf: {train_perf:.3f}, test perf: {test_perf:.3f}, total perf:  {total_perf:.3f}")
@@ -193,7 +197,7 @@ if __name__ == '__main__':
 
     parser.add_argument("-lr", "--learning_rate", default=0.0026, type=float,
                         help="Learning rate for the optimizer")
-    parser.add_argument("-K", "--n_iterations", default=80_000, type=int,
+    parser.add_argument("-K", "--n_iterations", default=8_000, type=int,
                         help="Number of total training steps")
 
     parser.add_argument("-a1", "--alpha1", default=5., type=float,
@@ -205,10 +209,16 @@ if __name__ == '__main__':
     parser.add_argument("-b", "--beta", default=1.0, type=float,
                         help="Scaling factor for the PSM")
 
+    parser.add_argument("-ld", "--learning_decay", default=0.999, type=float,
+                        help="learning rate decay")
+
+    parser.add_argument("-wd", "--weight_decay", default=0.01, type=float,
+                        help="weight decay")
+
     parser.add_argument("-l", "--lambda", default=0.5, type=float,
                         help="Inverse temperature")
 
-    parser.add_argument("-aug", "--augmentation", default="identity",
+    parser.add_argument("-aug", "--augmentation", default="conv",
                         choices=list(augmentations.aug_map.keys()),
                         help="The augmentation that should be applied to the states")
 
@@ -216,7 +226,7 @@ if __name__ == '__main__':
                         help="The seed to train on. If multiple values are provided, the script will "
                              "spawn a new process for each seed")
 
-    parser.add_argument("-loss", "--loss", choices=["paper", "repository", "explicit"], default="explicit",
+    parser.add_argument("-loss", "--loss", choices=["paper", "repository", "explicit"], default="repository",
                         help="which loss to use")
 
     args = parser.parse_args()
