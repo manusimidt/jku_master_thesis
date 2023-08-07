@@ -14,20 +14,25 @@ class ActorNet(nn.Module):
             nn.Conv2d(in_channels=64, out_channels=64, kernel_size=5, stride=2),  # 64x5x5
             nn.Flatten(),
             nn.ReLU(),
-            nn.Linear(64 * 5 * 5, 256),
+            nn.Linear(64 * 5 * 5, 512),
             nn.ReLU(),
+            nn.LayerNorm(512),
             # nn.Dropout(p=.4),
         )
 
         # projection head (for the contrastive loss)
         self.g = nn.Sequential(
-            nn.Linear(256, 64),
+            nn.Linear(512, 256),
+            nn.ReLU(),
+            nn.Linear(256, 128),
+            nn.LayerNorm(128),
         )
 
         # The downstream task (the actual actor)
         self.d = nn.Sequential(
-            nn.Linear(256, 17),  # Crafter has 17 actions
-            # nn.Dropout(p=.4)
+            nn.Linear(512, 256),
+            nn.ReLU(),
+            nn.Linear(256, 17),
         )
 
     def disable_embedding_weights(self):
