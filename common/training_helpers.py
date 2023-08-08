@@ -104,6 +104,10 @@ def cosine_similarity(a, b, eps=1e-8):
     return sim_mt
 
 
+def pairwise_distance(representation1, representation2):
+    return torch.cdist(representation1, representation2, p=2)
+
+
 if __name__ == '__main__':
     _sim_matrix = torch.normal(5, 2, size=(56, 56))
     _psm_matrix = torch.rand(size=(56, 56))

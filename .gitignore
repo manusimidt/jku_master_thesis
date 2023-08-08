@@ -139,3 +139,4 @@ dmypy.json
 
 
 .idea
+crafter_rl/path/to/logdir/stats.jsonl
