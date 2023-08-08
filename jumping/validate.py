@@ -2,8 +2,8 @@ import numpy as np
 import torch
 from matplotlib.backends.backend_agg import FigureCanvasAgg
 from common import map_conf_to_index, plot_evaluation_grid
-from env import VanillaEnv, obstacle_pos, floor_height
-from policy import ActorNet
+from jumping.env import VanillaEnv, obstacle_pos, floor_height
+from jumping.policy import ActorNet
 
 
 def validate(model: ActorNet, device, train_configurations):

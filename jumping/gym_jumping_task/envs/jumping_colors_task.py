@@ -25,7 +25,7 @@
 """Jumping Environment with red and green colored obstacles."""
 
 import enum
-from gym_jumping_task.envs import jumping_task
+from jumping.gym_jumping_task.envs import jumping_task
 import numpy as np
 
 RGB_WHITE = 1.0

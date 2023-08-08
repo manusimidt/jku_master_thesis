@@ -14,10 +14,10 @@ import wandb
 
 import common.psm as psm
 from common import set_seed, get_date_str, augmentations
-from env import TRAIN_CONFIGURATIONS, JumpingExpertBuffer, gen_rand_grid
+from jumping.env import TRAIN_CONFIGURATIONS, JumpingExpertBuffer, gen_rand_grid
 
-from policy import ActorNet
-from validate import validate
+from jumping.policy import ActorNet
+from jumping.validate import validate
 from common.training_helpers import cosine_similarity, pairwise_distance, contrastive_loss_paper, \
     contrastive_loss_repository, \
     contrastive_loss_explicit

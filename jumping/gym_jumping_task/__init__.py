@@ -24,7 +24,7 @@
 """Jumping task."""
 
 from gym.envs.registration import register, registry
-from gym_jumping_task.envs import COLORS
+from jumping.gym_jumping_task.envs import COLORS
 
 register(
     id='jumping-task-v0',

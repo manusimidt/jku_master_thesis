@@ -64,10 +64,6 @@ def contrastive_loss_repository(similarity_matrix, metric_values, temperature=1.
     Contrastive Loss with embedding similarity.
     Taken from Agarwal.et.al. rewritten in pytorch
     """
-    """
-    Contrastive Loss with embedding similarity.
-    Taken from Agarwal.et.al. rewritten in pytorch
-    """
     metric_shape = metric_values.size()
     similarity_matrix /= temperature
     neg_logits1, neg_logits2 = similarity_matrix, similarity_matrix
