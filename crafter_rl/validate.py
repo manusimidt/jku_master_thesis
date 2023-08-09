@@ -2,8 +2,8 @@ from collections import defaultdict
 
 import numpy as np
 import torch
-from env import VanillaEnv
-from policy import ActorNet
+from crafter_rl.env import VanillaEnv
+from crafter_rl.policy import ActorNet
 
 
 def validate(model: ActorNet, device, iterations=10):

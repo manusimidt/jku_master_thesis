@@ -14,53 +14,12 @@ import wandb
 
 import common.psm as psm
 from common import set_seed, get_date_str, augmentations
-from env import CrafterReplayBuffer
-
-from policy import ActorNet
-from validate import validate
-
-
-def contrastive_loss(similarity_matrix, metric_values, temperature=1.0, beta=1.0):
-    """
-    Contrastive Loss with embedding similarity.
-    Taken from Agarwal.et.al. rewritten in pytorch
-    """
-    # z_\theta(X): embedding_1 = nn_model.representation(X)
-    # z_\theta(Y): embedding_2 = nn_model.representation(Y)
-    # similarity_matrix = cosine_similarity(embedding_1, embedding_2
-    # metric_values = PSM(X, Y)
-    metric_shape = metric_values.size()
-    similarity_matrix /= temperature
-    neg_logits1 = similarity_matrix
-
-    col_indices = torch.argmin(metric_values, dim=1)
-    pos_indices1 = torch.stack(
-        (torch.arange(metric_shape[0], dtype=torch.int32, device=col_indices.device), col_indices), dim=1)
-    pos_logits1 = similarity_matrix[pos_indices1[:, 0], pos_indices1[:, 1]]
-
-    metric_values /= beta
-    similarity_measure = torch.exp(-metric_values)
-    pos_weights1 = -metric_values[pos_indices1[:, 0], pos_indices1[:, 1]]
-    pos_logits1 += pos_weights1
-    negative_weights = torch.log((1.0 - similarity_measure) + 1e-8)
-    negative_weights[pos_indices1[:, 0], pos_indices1[:, 1]] = pos_weights1
-
-    neg_logits1 += negative_weights
-
-    neg_logits1 = torch.logsumexp(neg_logits1, dim=1)
-    return torch.mean(neg_logits1 - pos_logits1)  # Equation 4
+from crafter_rl.env import CrafterReplayBuffer
+from common.training_helpers import contrastive_loss_repository, cosine_similarity
+from crafter_rl.policy import ActorNet
+from crafter_rl.validate import validate
 
 
-def cosine_similarity(a, b, eps=1e-8):
-    """
-    Computes cosine similarity between all pairs of vectors in x and y
-    added eps for numerical stability
-    """
-    a_n, b_n = a.norm(dim=1)[:, None], b.norm(dim=1)[:, None]
-    a_norm = a / torch.max(a_n, eps * torch.ones_like(a_n))
-    b_norm = b / torch.max(b_n, eps * torch.ones_like(b_n))
-    sim_mt = torch.mm(a_norm, b_norm.transpose(0, 1))
-    return sim_mt
 
 
 @torch.enable_grad()
@@ -80,7 +39,7 @@ def train(net, optim, alpha1, alpha2, beta, inv_temp, psm_func, buffer, loss_bc,
         similarity_matrix = cosine_similarity(representation_1, representation_2)
 
         metric_values = psm_func(actionsX, actionsY)
-        alignment_loss = contrastive_loss(similarity_matrix, metric_values, inv_temp, beta)
+        alignment_loss = contrastive_loss_repository(similarity_matrix, metric_values, inv_temp)
 
     if alpha2 != 0:
         bc_states, bc_actions = buffer.sample(batch_size)
@@ -128,9 +87,11 @@ def main(hyperparams: dict, train_dir: str, experiment_id: str):
     print("Training on ", device)
     net = ActorNet().to(device)
     optimizer = optim.Adam(net.parameters(), lr=hyperparams['learning_rate'])
+    lr_decay = optim.lr_scheduler.ExponentialLR(optimizer=optimizer, gamma=hyperparams['learning_decay'])
+
     loss_bc = nn.CrossEntropyLoss()
 
-    buffer = CrafterReplayBuffer(device, hyperparams['seed'], './dataset')
+    buffer = CrafterReplayBuffer(device, hyperparams['seed'], './crafter_rl/dataset')
 
     for step in range(hyperparams['n_iterations']):
         # Sample a pair of training MDPs
@@ -145,6 +106,8 @@ def main(hyperparams: dict, train_dir: str, experiment_id: str):
                      "Test loss": test_err}
         wandb.log(loss_dict, step=step)
         losses.append(loss_dict)
+        if step % 10 == 0:
+            lr_decay.step()
 
         if step % 1000 == 0:
             returns, steps, achievements, inventory = validate(net, device)
@@ -175,7 +138,7 @@ if __name__ == '__main__':
     parser.add_argument("-c", "--conf", choices=["narrow_grid", "wide_grid"], default="wide_grid",
                         help="The environment configuration to train on")
 
-    parser.add_argument("-psm", "--psm", choices=["f", "fb"], default="f",
+    parser.add_argument("-psm", "--psm", choices=["f", "fb"], default="fb",
                         help="The PSM distance function to use (f=forward PSM, fb=forward-backward PSM)")
 
     parser.add_argument("-bs", "--batch_size", default=256, type=int,
@@ -185,12 +148,12 @@ if __name__ == '__main__':
                         help="If true, the algorithm will be trained on a balanced dataset (1/3 action 1, 2/3 action 0 "
                              "examples)")
 
-    parser.add_argument("-lr", "--learning_rate", default=0.0026, type=float,
+    parser.add_argument("-lr", "--learning_rate", default=0.008, type=float,
                         help="Learning rate for the optimizer")
-    parser.add_argument("-K", "--n_iterations", default=300_000, type=int,
+    parser.add_argument("-K", "--n_iterations", default=100_000, type=int,
                         help="Number of total training steps")
 
-    parser.add_argument("-a1", "--alpha1", default=.1, type=float,
+    parser.add_argument("-a1", "--alpha1", default=5., type=float,
                         help="Scaling factor for the alignment loss")
 
     parser.add_argument("-a2", "--alpha2", default=1., type=float,
@@ -199,10 +162,16 @@ if __name__ == '__main__':
     parser.add_argument("-b", "--beta", default=1.0, type=float,
                         help="Scaling factor for the PSM")
 
+    parser.add_argument("-ld", "--learning_decay", default=0.999, type=float,
+                        help="learning rate decay")
+
+    parser.add_argument("-wd", "--weight_decay", default=0.0, type=float,
+                        help="weight decay")
+
     parser.add_argument("-l", "--lambda", default=0.5, type=float,
                         help="Inverse temperature")
 
-    parser.add_argument("-aug", "--augmentation", default="identity",
+    parser.add_argument("-aug", "--augmentation", default="conv",
                         choices=list(augmentations.aug_map.keys()),
                         help="The augmentation that should be applied to the states")
 

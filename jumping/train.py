@@ -22,37 +22,6 @@ from common.training_helpers import cosine_similarity, pairwise_distance, contra
     contrastive_loss_repository, \
     contrastive_loss_explicit
 
-
-def log_sim(sim_matrix, metric_values):
-    # ind_x = torch.arange(0, metric_values.shape[0])
-    # ind_y = torch.arange(0, metric_values.shape[1])
-    # positive_pairs_x = metric_values.argmin(axis=0)
-    # positive_pairs_y = metric_values.argmin(axis=1)
-
-    # positive_sim_x = sim_matrix[ind_x, positive_pairs_x]
-    # positive_sim_y = sim_matrix[positive_pairs_y, ind_y]
-
-    # negative_sim_x = torch.cat((sim_matrix[ind_x, :positive_pairs_x], sim_matrix[ind_x, positive_pairs_x + 1:]))
-    # negative_sim_y = torch.cat((sim_matrix[:positive_pairs_y, ind_y], sim_matrix[positive_pairs_x + 1:, ind_y]))
-
-    # pos_sim = torch.mean(torch.cat((positive_sim_x, positive_sim_y)))
-    # neg_sim = torch.mean(torch.cat((negative_sim_x, negative_sim_y)))
-    # return pos_sim, neg_sim
-    total_pos_sim = 0
-    total_neg_sim = 0
-    for state_idx in range(sim_matrix.shape[1]):
-        best_match = torch.argmax(metric_values[:, state_idx])
-        total_pos_sim += sim_matrix[best_match, state_idx]
-        total_neg_sim += torch.mean(torch.cat(
-            (sim_matrix[:best_match, state_idx], sim_matrix[best_match + 1:, state_idx]),
-            dim=0))
-
-    wandb.log({
-        "Positive similarity": total_pos_sim / sim_matrix.shape[1],
-        "Negative similarity": total_neg_sim / sim_matrix.shape[1]
-    })
-
-
 @torch.enable_grad()
 def train(net, optim, alpha1, alpha2, beta, inv_temp, psm_func, loss_func, buffer, loss_bc, batch_size,
           augmentation=augmentations.identity):
@@ -152,7 +121,7 @@ def main(hyperparams: dict, train_dir: str, experiment_id: str):
             lr_decay.step()
 
         print(f"Iteration {step}. Loss: {total_err:2.3f}")
-        if step % 80 == 0:
+        if step % 250 == 0:
             grid, train_perf, test_perf, total_perf, avg_jumps = validate(net, device, training_conf)
             print(
                 f"Validation: train perf: {train_perf:.3f}, test perf: {test_perf:.3f}, total perf:  {total_perf:.3f}")
