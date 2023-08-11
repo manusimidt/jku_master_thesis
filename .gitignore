@@ -5,7 +5,8 @@ __pycache__/
 
 # C extensions
 *.so
-
+/coinrun/dataset
+/coinrun/runs
 /crafter_rl/dataset
 /crafter_rl/logdir
 /crafter_rl/experiments
