@@ -1,14 +1,17 @@
+import os
+
 import torch
 import numpy as np
 from coinrun.env import VanillaEnv
 from common.rl.ppo.policies import ActorCriticNet
 
 
-def validate(model, start_level=0xABC, num_levels=0, iterations=100, record_optimal=False):
+def validate(model, start_level, num_levels, iterations=100, record_optimal=False):
     env = VanillaEnv(start_level=start_level, num_levels=num_levels)
 
     avg_reward = []
     avg_iterations = []
+    solved = 0
 
     for _ in range(iterations):
         cum_reward = 0  # cumulative reward
@@ -19,22 +22,42 @@ def validate(model, start_level=0xABC, num_levels=0, iterations=100, record_opti
         while True:
             action_logits = model.actor.forward(torch.FloatTensor(obs).unsqueeze(0))
             action = torch.argmax(action_logits)
-            obs, rew, done, info = env.step(action)
+            next_obs, rew, done, info = env.step(action)
 
             num_iterations += 1
             cum_reward += rew
+            states.append(obs)
+            actions.append(action)
+
+            obs = next_obs
+
             if done:
-                if record_optimal and rew == 10.0:
-                    np.savez(f'./dataset/{info["level_seed"]}.npz', state=np.array(states), action=np.array(actions))
+                if info["success"]:
+                    solved += 1
+                    if record_optimal:
+                        target_folder = f'./dataset/{num_levels}'
+                        file_path = f'{target_folder}/{info["level_seed"]}-{_get_episode_nr(target_folder, info["level_seed"])}.npz'
+                        np.savez(file_path, state=np.array(states), action=np.array(actions))
+                        print(f"Seed {info['level_seed']} solved!")
                 break
         avg_reward.append(cum_reward)
         avg_iterations.append(num_iterations)
-    return np.mean(avg_reward), np.mean(avg_iterations)
+    return solved / iterations, np.mean(avg_reward), np.mean(avg_iterations)
+
+
+def _get_episode_nr(target_folder: str, seed: int) -> int:
+    """
+    Each episode is named after the seed of the env and an appended increment.
+    This function looks into the target_folder and returns the next increment
+    """
+    return len([filename for filename in os.listdir(target_folder) if filename.startswith(str(seed) + '-')])
 
 
 if __name__ == '__main__':
     _model = ActorCriticNet(obs_space=(3, 64, 64), action_space=15, hidden_size=256)
-    ckp = torch.load('./runs/ppo-test-2.pth')
+    _num_seeds = 1000
+
+    ckp = torch.load(f'./runs/ppo-{_num_seeds}.pth')
     _model.load_state_dict(ckp['state_dict'])
 
-    print(validate(_model, start_level=0xCAFE, num_levels=20, record_optimal=True))
+    print(validate(_model, start_level=0, num_levels=_num_seeds, record_optimal=True, iterations=1000))
