@@ -5,9 +5,9 @@ import numpy as np
 
 
 class VanillaEnv(gym.Env):
-    def __init__(self, start_level=0xCAFEBEE, num_levels=1):
+    def __init__(self, start_level=0, num_levels=0):
         self.actual_env = gym.make('procgen:procgen-coinrun-v0', start_level=start_level,
-                                   num_levels=num_levels)
+                                   num_levels=num_levels, distribution_mode="easy")
 
     def step(self, action):
         obs, r, done, info = self.actual_env.step(action)

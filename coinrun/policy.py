@@ -1,9 +1,9 @@
 import torch.nn as nn
 
 
-class CoinRunNet(nn.Module):
+class CoinRunActor(nn.Module):
     def __init__(self):
-        super(CoinRunNet, self).__init__()
+        super(CoinRunActor, self).__init__()
         # feature extractor aka base encoder network
         self.f = nn.Sequential(
             # in 3 x 64 x 64
@@ -41,7 +41,7 @@ class CoinRunNet(nn.Module):
         for p in self.g.parameters():
             p.requires_grad = False
 
-    def forward(self, x, contrastive: bool, full_network: bool = False):
+    def forward(self, x, contrastive: bool = False, full_network: bool = True):
         h = self.f(x)
         if contrastive:
             return self.g(h)
@@ -51,3 +51,32 @@ class CoinRunNet(nn.Module):
             else:
                 # Stop gradient backpropagation from downstream task layer into embedding
                 return self.d(h.detach())
+
+
+class CoinRunCritic(nn.Module):
+    def __init__(self):
+        super(CoinRunCritic, self).__init__()
+        # feature extractor aka base encoder network
+        self.f = nn.Sequential(
+            # in 3 x 64 x 64
+            nn.Conv2d(in_channels=3, out_channels=32, kernel_size=5, stride=2),  # 32x30x30
+            nn.ReLU(),
+            nn.Conv2d(in_channels=32, out_channels=64, kernel_size=5, stride=2),  # 64x13x13
+            nn.ReLU(),
+            nn.Conv2d(in_channels=64, out_channels=64, kernel_size=5, stride=2),  # 64x5x5
+            nn.Flatten(),
+            nn.ReLU(),
+            nn.Linear(64 * 5 * 5, 512),
+            nn.ReLU(),
+            nn.LayerNorm(512),
+            # nn.Dropout(p=.4),
+        )
+        self.d = nn.Sequential(
+            nn.Linear(512, 256),
+            nn.ReLU(),
+            nn.Linear(256, 1),
+        )
+
+    def forward(self, x):
+        h = self.f(x)
+        return self.d(h)

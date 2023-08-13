@@ -17,7 +17,7 @@ from coinrun.validate import validate
 from common import set_seed, get_date_str, augmentations
 from coinrun.env import CoinRunReplayBuffer
 
-from coinrun.policy import CoinRunNet
+from coinrun.policy import CoinRunActor
 from common.training_helpers import cosine_similarity, contrastive_loss_repository
 
 
@@ -59,7 +59,7 @@ def train(net, optim, alpha1, alpha2, beta, inv_temp, psm_func, buffer, loss_bc,
 
 
 @torch.no_grad()
-def evaluate(net: CoinRunNet, buffer: CoinRunReplayBuffer, batch_size: int, loss_actor=nn.CrossEntropyLoss()):
+def evaluate(net: CoinRunActor, buffer: CoinRunReplayBuffer, batch_size: int, loss_actor=nn.CrossEntropyLoss()):
     """
     Evaluates the network on a randomly sampled batch without applying any augmentation!
     """
@@ -84,16 +84,15 @@ def main(hyperparams: dict, train_dir: str, experiment_id: str):
     psm_functions = {"f": psm.psm_f_fast, "fb": psm.psm_fb_fast}
     psm_func = psm_functions[hyperparams["psm"]]
 
-
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print("Training on ", device)
-    net = CoinRunNet().to(device)
+    net = CoinRunActor().to(device)
     optimizer = optim.Adam(net.parameters(), lr=hyperparams['learning_rate'], weight_decay=hyperparams['weight_decay'])
     lr_decay = optim.lr_scheduler.ExponentialLR(optimizer=optimizer, gamma=hyperparams['learning_decay'])
 
     loss_bc = nn.CrossEntropyLoss()
 
-    buffer = CoinRunReplayBuffer( device, hyperparams['seed'], './dataset/100')
+    buffer = CoinRunReplayBuffer(device, hyperparams['seed'], './dataset/100')
 
     for step in range(hyperparams['n_iterations']):
         # Sample a pair of training MDPs
@@ -151,7 +150,6 @@ if __name__ == '__main__':
 
     parser.add_argument("-bs", "--batch_size", default=256, type=int,
                         help="Size of one Minibatch")
-
 
     parser.add_argument("-lr", "--learning_rate", default=0.0026, type=float,
                         help="Learning rate for the optimizer")

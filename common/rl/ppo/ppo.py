@@ -1,6 +1,8 @@
 import os
 import gym
 import torch
+
+
 from common.rl.logger import Tracker
 from common.rl.utils import set_seed
 from common.rl.buffer2 import Episode, Transition, RolloutBuffer
@@ -12,6 +14,7 @@ class PPO:
                  policy: ActorCriticNet,
                  env: gym.Env,
                  optimizer: torch.optim.Optimizer,
+                 lr_decay: torch.optim.lr_scheduler.LRScheduler,
                  metric=torch.nn.MSELoss(),
                  buffer: RolloutBuffer = RolloutBuffer(),
                  seed: int or None = None,
@@ -33,6 +36,7 @@ class PPO:
         self.policy = policy.to(device)
         self.env = env
         self.optimizer = optimizer
+        self.lr_decay = lr_decay
         self.metric = metric
         self.buffer = buffer
 
@@ -102,6 +106,7 @@ class PPO:
             self.optimizer.zero_grad()
             loss.mean().backward()
             self.optimizer.step()
+            self.lr_decay.step()
             self.tracker.end_epoch({
                 "value_loss": value_loss.mean(),
                 "policy_loss": policy_loss.mean(),

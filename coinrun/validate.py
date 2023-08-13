@@ -3,6 +3,7 @@ import os
 import torch
 import numpy as np
 from coinrun.env import VanillaEnv
+from coinrun.policy import CoinRunActor, CoinRunCritic
 from common.rl.ppo.policies import ActorCriticNet
 
 
@@ -35,11 +36,11 @@ def validate(model, start_level, num_levels, iterations=100, record_optimal=Fals
             if done:
                 if info["success"]:
                     solved += 1
+                    print(f"Seed {info['level_seed']} solved!")
                     if record_optimal:
                         target_folder = f'./dataset/{num_levels}'
                         file_path = f'{target_folder}/{info["level_seed"]}-{_get_episode_nr(target_folder, info["level_seed"])}.npz'
                         np.savez(file_path, state=np.array(states), action=np.array(actions))
-                        print(f"Seed {info['level_seed']} solved!")
                 break
         avg_reward.append(cum_reward)
         avg_iterations.append(num_iterations)
@@ -56,9 +57,11 @@ def _get_episode_nr(target_folder: str, seed: int) -> int:
 
 if __name__ == '__main__':
     _model = ActorCriticNet(obs_space=(3, 64, 64), action_space=15, hidden_size=256)
-    _num_seeds = 1000
+    _model.actor = CoinRunActor()
+    _model.critic = CoinRunCritic()
+    _num_seeds = 100
 
     ckp = torch.load(f'./runs/ppo-{_num_seeds}.pth')
     _model.load_state_dict(ckp['state_dict'])
 
-    print(validate(_model, start_level=0, num_levels=_num_seeds, record_optimal=True, iterations=1000))
+    print(validate(_model.actor, start_level=12345678, num_levels=_num_seeds, record_optimal=False, iterations=1000))
