@@ -113,7 +113,7 @@ class PPO:
         Collect rollouts
         :param n_episodes: number of full episodes the agent should interact with the environment
         """
-        for i in range(n_episodes):
+        for _ in range(n_episodes):
             state = self.env.reset()
             # create a new episode
             episode = Episode(discount=self.gamma)

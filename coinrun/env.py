@@ -27,7 +27,7 @@ class CoinRunReplayBuffer:
     def __init__(self, device, seed, data_dir):
         self.device = device
         self.data_dir = data_dir
-        self.buffer_size = 1537  # Size of the imitation dataset i downloaded
+        self.buffer_size = self._calc_buffer_size()  # Size of the imitation dataset i downloaded
         self.rng = np.random.default_rng(seed=seed)
 
         self.states = torch.empty((self.buffer_size, 3, 64, 64), device=device, dtype=torch.float32)
@@ -36,6 +36,13 @@ class CoinRunReplayBuffer:
         self.episode_start_idx = []
 
         self._populate()
+
+    def _calc_buffer_size(self):
+        size = 0
+        for file in os.listdir(self.data_dir):
+            with np.load(self.data_dir + os.sep + file) as data:
+                size += len(data['state'])
+        return size
 
     def _populate(self):
         i = 0
@@ -71,7 +78,7 @@ class CoinRunReplayBuffer:
 
 
 if __name__ == '__main__':
-    buffer = CoinRunReplayBuffer('cpu', 0, './dataset')
+    buffer = CoinRunReplayBuffer('cpu', 0, './dataset/10')
     print(buffer.sample(batch_size=23)[0].shape)
     print(buffer.sample_trajectory()[0].shape)
 

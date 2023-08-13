@@ -7,6 +7,7 @@ from common.rl.ppo.policies import ActorCriticNet
 
 
 def validate(model, start_level, num_levels, iterations=100, record_optimal=False):
+    device = next(model.parameters())
     env = VanillaEnv(start_level=start_level, num_levels=num_levels)
 
     avg_reward = []
@@ -20,9 +21,9 @@ def validate(model, start_level, num_levels, iterations=100, record_optimal=Fals
         actions = []
         obs = env.reset()
         while True:
-            action_logits = model.actor.forward(torch.FloatTensor(obs).unsqueeze(0))
+            action_logits = model.forward(torch.FloatTensor(obs).to(device).unsqueeze(0))
             action = torch.argmax(action_logits)
-            next_obs, rew, done, info = env.step(action)
+            next_obs, rew, done, info = env.step(action.item())
 
             num_iterations += 1
             cum_reward += rew

@@ -102,6 +102,9 @@ class WandBLogger(Logger):
     def on_episode_end(self, episode: int, **kwargs):
         wandb.log({"episode/return": kwargs['episode_return'], "episode/length": kwargs['episode_length']})
 
+    def log_custom(self, log_dict):
+        wandb.log(log_dict)
+
 
 class FigureLogger(Logger):
     """
