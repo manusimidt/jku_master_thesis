@@ -17,15 +17,15 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
 
-    parser.add_argument("--num_levels", default=128, type=int,
+    parser.add_argument("--num_levels", default=64, type=int,
                         help="Number of different seeds/levels used for training")
-    parser.add_argument("-lr", "--learning_rate", default=0.001, type=float,
+    parser.add_argument("-lr", "--learning_rate", default=0.02, type=float,
                         help="Learning rate for the optimizer")
     parser.add_argument("-ld", "--learning_decay", default=0.995, type=float,
                         help="learning rate decay")
     parser.add_argument("-bs", "--batch_size", default=256, type=int,
                         help="Size of one Minibatch")
-    parser.add_argument("--n_epochs", default=10, type=int,
+    parser.add_argument("--n_epochs", default=5, type=int,
                         help="Size of one Minibatch")
 
     args = parser.parse_args()

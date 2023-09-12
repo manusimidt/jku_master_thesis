@@ -12,7 +12,7 @@ class VanillaEnv(gym.Env):
     def step(self, action):
         obs, r, done, info = self.actual_env.step(action)
         info["success"] = r == 10
-        if r == 0: r = -0.02  # slightly punish the agent for each time step
+        #if r == 0: r = -0.02  # slightly punish the agent for each time step
         return np.array(np.moveaxis(obs, -1, -3) / 255, dtype=np.float32), r, done, info
 
     def reset(self, **kwargs):

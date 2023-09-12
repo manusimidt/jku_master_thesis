@@ -1,8 +1,7 @@
 import os
 import gym
 import torch
-
-
+import numpy as np
 from common.rl.logger import Tracker
 from common.rl.utils import set_seed
 from common.rl.buffer2 import Episode, Transition, RolloutBuffer
@@ -58,6 +57,8 @@ class PPO:
         self.policy.train()  # Switch to train mode (as apposed to eval)
         self.optimizer.zero_grad()
 
+        value_losses = policy_losses = entropy_losses = total_losses = []
+
         for _ in range(self.n_epochs):
             # sample batch from buffer
             samples = self.buffer.sample()
@@ -107,11 +108,19 @@ class PPO:
             loss.mean().backward()
             self.optimizer.step()
             self.lr_decay.step()
-            self.tracker.end_epoch({
-                "value_loss": value_loss.mean(),
-                "policy_loss": policy_loss.mean(),
-                "entropy_loss": entropy.view(-1, 1).mean()
-            })
+
+            value_losses.append(value_loss.mean())
+            policy_losses.append(policy_loss.mean())
+            entropy_losses.append(entropy.view(-1, 1).mean())
+            total_losses.append(loss.mean())
+
+        self.tracker.end_epoch({
+            "value_loss": np.mean(value_losses),
+            "policy_loss": np.mean(policy_losses),
+            "entropy_loss": np.mean(entropy_losses),
+            "total_loss": np.mean(total_losses),
+            "learning_rate": self.lr_decay.get_last_lr()[0]
+        })
 
     def learn(self, n_episodes) -> None:
         """
@@ -135,7 +144,8 @@ class PPO:
                 episode.total_reward += reward
 
                 # store agent trajectory
-                transition = Transition(state=state, action=action, reward=(reward * self.reward_scale), log_probs=log_probs)
+                transition = Transition(state=state, action=action, reward=(reward * self.reward_scale),
+                                        log_probs=log_probs)
                 episode.append(transition)
 
                 # update agent if done

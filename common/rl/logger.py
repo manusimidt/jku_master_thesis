@@ -10,24 +10,25 @@ from torch.utils.tensorboard import SummaryWriter
 import wandb
 
 
-class Logger(abc.ABC):
+class Logger:
     """ Extracts and/or persists tracker information. """
 
     def __init__(self):
+        self.step = 0
+        self._last_epoch_step, self._last_episode_step = -1, -1
         pass
 
-    @abc.abstractmethod
-    def on_step(self, step: int, **kwargs):
-        pass
+    def on_step(self, **kwargs):
+        self.step += 1
 
-    @abc.abstractmethod
     def on_epoch_end(self, epoch: int, **kwargs):
         """Actions to take on the end of an epoch."""
-        pass
+        assert self._last_epoch_step != self.step, "on_epoch_end() was called twice per step!"
+        self._last_epoch_step = self.step
 
-    @abc.abstractmethod
     def on_episode_end(self, episode: int, **kwargs):
-        pass
+        assert self._last_episode_step != self.step, "on_episode_end() was called twice per step!"
+        self._last_episode_step = self.step
 
 
 class ConsoleLogger(Logger):
@@ -41,13 +42,14 @@ class ConsoleLogger(Logger):
         self.average_over = average_over if average_over else log_every
         self.return_queue = deque(maxlen=average_over)
 
-    def on_step(self, step: int, **kwargs):
-        pass
+    def on_step(self, **kwargs):
+        super().on_step()
 
     def on_epoch_end(self, epoch: int, **kwargs):
-        pass
+        super().on_epoch_end(epoch)
 
     def on_episode_end(self, episode: int, **kwargs):
+        super().on_episode_end(episode)
         self.return_queue.append(kwargs['episode_return'])
         if not episode % self.log_every == 0: return
         msg = f"Episode: {str(episode).rjust(6)}, avg.ret.: {np.mean(self.return_queue):.4f} " \
@@ -87,23 +89,31 @@ class TensorboardLogger(Logger):
 
 
 class WandBLogger(Logger):
+    """
+    Todo
+    All plots have the number of environment steps as x axis!
+    """
+
     def __init__(self, project: str, info: dict):
         super().__init__()
         wandb.init(project=project, config=info)
+        self.step = 0
         print(f"Weights&Biases logger active. See results in project {project}'")
 
-    def on_step(self, step: int, **kwargs):
-        pass
+    def on_step(self, **kwargs):
+        super().on_step()
 
     def on_epoch_end(self, epoch: int, **kwargs):
+        super().on_epoch_end(epoch)
         if 'losses' in kwargs and kwargs['losses']:
-            wandb.log(kwargs['losses'])
+            wandb.log(kwargs['losses'], self.step)
 
     def on_episode_end(self, episode: int, **kwargs):
-        wandb.log({"episode/return": kwargs['episode_return'], "episode/length": kwargs['episode_length']})
+        super().on_episode_end(episode)
+        wandb.log({"episode/return": kwargs['episode_return'], "episode/length": kwargs['episode_length']}, self.step)
 
     def log_custom(self, log_dict):
-        wandb.log(log_dict)
+        wandb.log(log_dict, self.step)
 
 
 class FigureLogger(Logger):
@@ -154,11 +164,6 @@ class FigureLogger(Logger):
         plot2.set_xlabel('Episode')
         plot2.set_ylabel('Episode Length')
         return fig
-
-
-class WeightsAndBiasesLogger:
-    # todo
-    pass
 
 
 class Tracker:

@@ -36,7 +36,6 @@ def validate(model, start_level, num_levels, iterations=100, record_optimal=Fals
             if done:
                 if info["success"]:
                     solved += 1
-                    print(f"Seed {info['level_seed']} solved!")
                     if record_optimal:
                         target_folder = f'./dataset/{num_levels}'
                         file_path = f'{target_folder}/{info["level_seed"]}-{_get_episode_nr(target_folder, info["level_seed"])}.npz'

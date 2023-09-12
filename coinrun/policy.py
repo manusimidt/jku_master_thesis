@@ -16,7 +16,7 @@ class CoinRunActor(nn.Module):
             nn.ReLU(),
             nn.Linear(64 * 5 * 5, 512),
             nn.ReLU(),
-            nn.LayerNorm(512),
+            #nn.LayerNorm(512),
             # nn.Dropout(p=.4),
         )
 
@@ -25,7 +25,7 @@ class CoinRunActor(nn.Module):
             nn.Linear(512, 256),
             nn.ReLU(),
             nn.Linear(256, 128),
-            nn.LayerNorm(128),
+            #nn.LayerNorm(128),
         )
 
         # The downstream task (the actual actor)
@@ -68,7 +68,7 @@ class CoinRunCritic(nn.Module):
             nn.ReLU(),
             nn.Linear(64 * 5 * 5, 512),
             nn.ReLU(),
-            nn.LayerNorm(512),
+            #nn.LayerNorm(512),
             # nn.Dropout(p=.4),
         )
         self.d = nn.Sequential(
