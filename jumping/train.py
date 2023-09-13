@@ -79,7 +79,7 @@ def main(hyperparams: dict, train_dir: str, experiment_id: str):
 
     run_name = 'run-' + str(hyperparams['seed'])
 
-    wandb.init(project="bc-generalization", dir=train_dir, group=experiment_id, config=hyperparams)
+    wandb.init(project="pse-jumping", dir=train_dir, group=experiment_id, config=hyperparams)
     losses = []
 
     psm_functions = {"f": psm.psm_f_fast, "fb": psm.psm_fb_fast}
