@@ -32,7 +32,7 @@ class CoinRunActor(nn.Module):
         self.d = nn.Sequential(
             nn.Linear(512, 256),
             nn.ReLU(),
-            nn.Linear(256, 17),
+            nn.Linear(256, 15),
         )
 
     def disable_embedding_weights(self):

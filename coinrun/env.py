@@ -2,17 +2,32 @@ import os
 import gym
 import torch
 import numpy as np
+from gym import spaces
 
 
 class VanillaEnv(gym.Env):
-    def __init__(self, start_level=0, num_levels=0):
-        self.actual_env = gym.make('procgen:procgen-coinrun-v0', start_level=start_level,
-                                   num_levels=num_levels, distribution_mode="easy")
+
+    def __init__(self, start_level=0, num_levels=0, render_mode="rgb_array"):
+        # dist mode hard => 17
+        # dist mode easy => 13
+        self.actual_env = gym.make('procgen:procgen-coinrun-v0', start_level=start_level, paint_vel_info=True,
+                                   num_levels=num_levels, render_mode=render_mode)
+
+        self.action_space = self.actual_env.action_space
+        # Example for using image as input (channel-first; channel-last also works):
+        self.observation_space = spaces.Box(low=0., high=1.,
+                                            shape=(3, 64, 64), dtype=np.float32)
 
     def step(self, action):
         obs, r, done, info = self.actual_env.step(action)
+
         info["success"] = r == 10
-        #if r == 0: r = -0.02  # slightly punish the agent for each time step
+
+        r += ((obs[0, 0, 0] / 255) - 0.5) * 0.2
+        if action in (2, 5, 8):
+            r -= 0.1
+
+        # if r == 0: r = -0.02  # slightly punish the agent for each time step
         return np.array(np.moveaxis(obs, -1, -3) / 255, dtype=np.float32), r, done, info
 
     def reset(self, **kwargs):
@@ -78,7 +93,7 @@ class CoinRunReplayBuffer:
 
 
 if __name__ == '__main__':
-    buffer = CoinRunReplayBuffer('cpu', 0, './dataset/10')
+    buffer = CoinRunReplayBuffer('cpu', 0, './dataset/62')
     print(buffer.sample(batch_size=23)[0].shape)
     print(buffer.sample_trajectory()[0].shape)
 

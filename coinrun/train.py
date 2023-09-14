@@ -92,7 +92,7 @@ def main(hyperparams: dict, train_dir: str, experiment_id: str):
 
     loss_bc = nn.CrossEntropyLoss()
 
-    buffer = CoinRunReplayBuffer(device, hyperparams['seed'], './dataset/100')
+    buffer = CoinRunReplayBuffer(device, hyperparams['seed'], './dataset/62')
 
     for step in range(hyperparams['n_iterations']):
         # Sample a pair of training MDPs
