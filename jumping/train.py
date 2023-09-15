@@ -22,8 +22,9 @@ from common.training_helpers import cosine_similarity, pairwise_distance, contra
     contrastive_loss_repository, \
     contrastive_loss_explicit
 
+
 @torch.enable_grad()
-def train(net, optim, alpha1, alpha2, beta, inv_temp, psm_func, loss_func, buffer, loss_bc, batch_size,
+def train(net, optim, alpha1, alpha2, beta, inv_temp, psm_func, loss_func, buffer, balanced, loss_bc, batch_size,
           augmentation=augmentations.identity):
     net.train()
     alignment_loss = cross_entropy_loss = torch.tensor(0)
@@ -44,7 +45,7 @@ def train(net, optim, alpha1, alpha2, beta, inv_temp, psm_func, loss_func, buffe
         # log_sim(cosine_similarity(representation_1, representation_2), metric_values)
 
     if alpha2 != 0:
-        bc_states, bc_actions = buffer.sample(batch_size)
+        bc_states, bc_actions = buffer.sample(batch_size, balanced=balanced)
         bc_states = augmentation(bc_states)
         # if alpha1 is zero, the first layers are not touched by PSE => train them with BC
         states_y_logits = net.forward(bc_states, contrastive=False, full_network=alpha1 == 0)
@@ -107,8 +108,8 @@ def main(hyperparams: dict, train_dir: str, experiment_id: str):
     for step in range(hyperparams['n_iterations']):
         # Sample a pair of training MDPs
         info = train(net, optimizer, hyperparams['alpha1'], hyperparams['alpha2'], hyperparams['beta'],
-                     hyperparams['lambda'], psm_func, loss_func, buffer, loss_bc, hyperparams['batch_size'],
-                     augmentations.aug_map[hyperparams['augmentation']])
+                     hyperparams['lambda'], psm_func, loss_func, buffer, hyperparams['balanced'], loss_bc,
+                     hyperparams['batch_size'], augmentations.aug_map[hyperparams['augmentation']])
 
         total_err, contrastive_err, cross_entropy_err = info
         test_err = evaluate(net, buffer, hyperparams['batch_size'])
@@ -161,12 +162,11 @@ if __name__ == '__main__':
                         help="Size of one Minibatch")
 
     parser.add_argument("--balanced", default=True, type=bool, action=argparse.BooleanOptionalAction,
-                        help="If true, the algorithm will be trained on a balanced dataset (1/3 action 1, 2/3 action 0 "
-                             "examples)")
+                        help="If true, the algorithm will be trained on a balanced dataset")
 
     parser.add_argument("-lr", "--learning_rate", default=0.0026, type=float,
                         help="Learning rate for the optimizer")
-    parser.add_argument("-K", "--n_iterations", default=10_000, type=int,
+    parser.add_argument("-K", "--n_iterations", default=50_000, type=int,
                         help="Number of total training steps")
 
     parser.add_argument("-a1", "--alpha1", default=5., type=float,

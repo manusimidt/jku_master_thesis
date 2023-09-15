@@ -108,7 +108,6 @@ class JumpingExpertBuffer:
 
         # Stores the indices of the jumping states/actions. For faster sampling
         self.jump_idx = []
-
         self._populate()
 
     def _populate(self):
@@ -138,17 +137,22 @@ class JumpingExpertBuffer:
             assert step == 56, "Non expert episode!"
         assert i == self.buffer_size, "Buffer not correctly filled up"
 
-    def sample(self, batch_size, replace=False, upsample=False) -> tuple:
+    def sample(self, batch_size, replace=False, balanced=False) -> tuple:
         """
         Samples from the generated expert trajectories
         :param batch_size:
         :param replace: if replace is set to true, a batch can contain the same state twice
+        :param balanced: if balanced is set to true, a batch will contain the same amount of jumping and non-jumping states
         """
-        if not upsample:
+        if not balanced:
             ind = self.rng.choice(range(self.buffer_size), size=batch_size, replace=replace)
         else:
-            # TODO!
-            pass
+            ind_jumping = self.rng.choice(self.jump_idx, size=int(batch_size / 2), replace=True)
+            non_jump_idx = list(set(range(self.buffer_size)) - set(self.jump_idx))
+            ind_non_jumping = self.rng.choice(non_jump_idx, size=batch_size - len(ind_jumping), replace=replace)
+            ind = np.concatenate([ind_jumping, ind_non_jumping])
+            self.rng.shuffle(ind)
+
         return self.states[ind], self.actions[ind]
 
     def sample_trajectory(self) -> tuple:
@@ -206,7 +210,7 @@ def generate_positive_pairs(envs: [VanillaEnv]):
 
 if __name__ == '__main__':
     buffer = JumpingExpertBuffer(TRAIN_CONFIGURATIONS['wide_grid'], 'cuda', 3)
-    buffer.sample(12)
+    _states, _actions = buffer.sample(256, balance=True)
     buffer.sample_trajectory()
     _envs = [VanillaEnv()]
     for _env in _envs:
