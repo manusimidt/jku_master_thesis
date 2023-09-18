@@ -210,7 +210,7 @@ def generate_positive_pairs(envs: [VanillaEnv]):
 
 if __name__ == '__main__':
     buffer = JumpingExpertBuffer(TRAIN_CONFIGURATIONS['wide_grid'], 'cuda', 3)
-    _states, _actions = buffer.sample(256, balance=True)
+    _states, _actions = buffer.sample(256, balanced=True)
     buffer.sample_trajectory()
     _envs = [VanillaEnv()]
     for _env in _envs:

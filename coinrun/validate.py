@@ -22,7 +22,9 @@ def validate(model, start_level, num_levels, record_optimal=False, render_mode="
         actions = []
         obs = env.reset()
         while True:
-            action = model.act(torch.FloatTensor(obs).to(device).unsqueeze(0))[0].item()
+            if hasattr(model, 'act'): action = model.act(torch.FloatTensor(obs).to(device).unsqueeze(0))[0].item()
+            else: action = torch.argmax(model.forward(torch.FloatTensor(obs).to(device).unsqueeze(0))).item()
+
             next_obs, rew, done, info = env.step(action)
 
             num_iterations += 1

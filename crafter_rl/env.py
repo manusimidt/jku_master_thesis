@@ -94,9 +94,37 @@ class CrafterReplayBuffer:
             return self.states[self.episode_start_idx[idx]:], self.actions[self.episode_start_idx[idx]:]
 
 
+def simplify_actions(actions: torch.tensor) -> torch.tensor:
+    """
+    Simplifies the action space for calculating the PSE
+    0 Noop                  => 0 Nothing
+    1 Move Left             => 1 Move
+    2 Move Right            => 1 Move
+    3 Move Up               => 1 Move
+    4 Move Down             => 1 Move
+    5 Do                    => 2 Do
+    6 Sleep                 => 3 Sleep
+    7 Place Stone           => 4 Place Block
+    8 Place Table           => 4 Place Block
+    9 Place Furnace         => 4 Place Block
+    10 Place Plant          => 5 Place Plant
+    11 Make Wood Pickaxe    => 6 Make Pickaxe
+    12 Make Stone Pickaxe   => 6 Make Pickaxe
+    13 Make Iron Pickaxe    => 6 Make Pickaxe
+    14 Make Wood Sword      => 7 Make Weapon
+    15 Make Stone Sword     => 7 Make Weapon
+    16 Make Iron Sword      => 7 Make Weapon
+    """
+    remap_dict = {0: 0, 1: 1, 2: 1, 3: 1, 4: 1, 5: 2, 6: 3, 7: 4, 8: 4, 9: 4, 10: 5, 11: 6, 12: 6, 13: 6, 14: 7,
+                  15: 7, 16: 7}
+    remap_function = np.vectorize(lambda x: remap_dict.get(x, x))
+    return torch.from_numpy(remap_function(actions.cpu())).to(actions.device)
+
+
 if __name__ == '__main__':
-    buffer = CrafterReplayBuffer('cpu', 0, './dataset')
-    buffer.sample(batch_size=23)
+    buffer = CrafterReplayBuffer('cuda', 0, './dataset')
+    _states, _actions = buffer.sample(batch_size=23)
+    simplify_actions(_actions)
     buffer.sample_trajectory()
 
     _envs = [VanillaEnv()]

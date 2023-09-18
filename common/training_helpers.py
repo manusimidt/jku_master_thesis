@@ -1,5 +1,7 @@
 import torch
 
+EPS = 1e-9
+
 
 def contrastive_loss_explicit(similarity_matrix, metric_values, temperature=1.0, beta=1.0):
     loss = 0
@@ -59,7 +61,8 @@ def contrastive_loss_paper(similarity_matrix, metric_values, temperature=1.0, be
     return torch.mean(neg_logits1 - pos_logits1)  # Equation 4
 
 
-def contrastive_loss_repository(similarity_matrix, metric_values, temperature=1.0):
+def contrastive_loss_repository(similarity_matrix, metric_values, temperature=1.0, coupling_temperature=0.01,
+                                use_coupling_weights=False):
     """
     Contrastive Loss with embedding similarity.
     Taken from Agarwal.et.al. rewritten in pytorch
@@ -79,6 +82,17 @@ def contrastive_loss_repository(similarity_matrix, metric_values, temperature=1.
         (row_indices, torch.arange(metric_shape[1], dtype=torch.int32, device=col_indices.device)), dim=1)
     # pos_logits2 = torch.gather(similarity_matrix, dim=0, index=pos_indices2)
     pos_logits2 = similarity_matrix[tuple(pos_indices2.t())]
+
+    if use_coupling_weights:
+        metric_values /= coupling_temperature
+        coupling = torch.exp(-metric_values)
+        pos_weights1 = -metric_values[tuple(pos_indices1.t())]
+        pos_weights2 = -metric_values[tuple(pos_indices2.t())]
+        pos_logits1 += pos_weights1
+        pos_logits2 += pos_weights2
+        negative_weights = torch.log((1.0 - coupling) + EPS)
+        neg_logits1 += negative_weights
+        neg_logits2 += negative_weights
 
     neg_logits1 = torch.logsumexp(neg_logits1, dim=1)
     neg_logits2 = torch.logsumexp(neg_logits2, dim=0)

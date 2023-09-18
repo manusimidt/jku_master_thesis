@@ -14,12 +14,10 @@ import wandb
 
 import common.psm as psm
 from common import set_seed, get_date_str, augmentations
-from crafter_rl.env import CrafterReplayBuffer
+from crafter_rl.env import CrafterReplayBuffer, simplify_actions
 from common.training_helpers import contrastive_loss_repository, cosine_similarity
 from crafter_rl.policy import ActorNet
 from crafter_rl.validate import validate
-
-
 
 
 @torch.enable_grad()
@@ -31,6 +29,9 @@ def train(net, optim, alpha1, alpha2, beta, inv_temp, psm_func, buffer, loss_bc,
     if alpha1 != 0:
         statesX, actionsX = buffer.sample_trajectory()
         statesY, actionsY = buffer.sample_trajectory()
+
+        actionsX = simplify_actions(actionsX)
+        actionsY = simplify_actions(actionsY)
 
         statesX, statesY = augmentation(statesX), augmentation(statesY)
 
@@ -138,7 +139,7 @@ if __name__ == '__main__':
     parser.add_argument("-c", "--conf", choices=["narrow_grid", "wide_grid"], default="wide_grid",
                         help="The environment configuration to train on")
 
-    parser.add_argument("-psm", "--psm", choices=["f", "fb"], default="fb",
+    parser.add_argument("-psm", "--psm", choices=["f", "fb"], default="f",
                         help="The PSM distance function to use (f=forward PSM, fb=forward-backward PSM)")
 
     parser.add_argument("-bs", "--batch_size", default=256, type=int,
@@ -148,12 +149,12 @@ if __name__ == '__main__':
                         help="If true, the algorithm will be trained on a balanced dataset (1/3 action 1, 2/3 action 0 "
                              "examples)")
 
-    parser.add_argument("-lr", "--learning_rate", default=0.008, type=float,
+    parser.add_argument("-lr", "--learning_rate", default=0.01, type=float,
                         help="Learning rate for the optimizer")
     parser.add_argument("-K", "--n_iterations", default=100_000, type=int,
                         help="Number of total training steps")
 
-    parser.add_argument("-a1", "--alpha1", default=5., type=float,
+    parser.add_argument("-a1", "--alpha1", default=.5, type=float,
                         help="Scaling factor for the alignment loss")
 
     parser.add_argument("-a2", "--alpha2", default=1., type=float,

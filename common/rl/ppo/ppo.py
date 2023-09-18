@@ -57,7 +57,7 @@ class PPO:
         self.policy.train()  # Switch to train mode (as apposed to eval)
         self.optimizer.zero_grad()
 
-        value_losses = policy_losses = entropy_losses = total_losses = []
+        value_losses, policy_losses, entropy_losses, total_losses = [], [], [], []
 
         for _ in range(self.n_epochs):
             # sample batch from buffer
@@ -109,10 +109,10 @@ class PPO:
             self.optimizer.step()
             self.lr_decay.step()
 
-            value_losses.append(value_loss.mean())
-            policy_losses.append(policy_loss.mean())
-            entropy_losses.append(entropy.view(-1, 1).mean())
-            total_losses.append(loss.mean())
+            value_losses.append(value_loss.mean().item())
+            policy_losses.append(policy_loss.mean().item())
+            entropy_losses.append(entropy.view(-1, 1).mean().item())
+            total_losses.append(loss.mean().item())
 
         self.tracker.end_epoch({
             "value_loss": np.mean(value_losses),

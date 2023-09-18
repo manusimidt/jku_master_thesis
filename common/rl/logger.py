@@ -90,14 +90,12 @@ class TensorboardLogger(Logger):
 
 class WandBLogger(Logger):
     """
-    Todo
-    All plots have the number of environment steps as x axis!
+    All plots have the number of environment steps as x-axis!
     """
 
     def __init__(self, project: str, info: dict):
         super().__init__()
         wandb.init(project=project, config=info)
-        self.step = 0
         print(f"Weights&Biases logger active. See results in project {project}'")
 
     def on_step(self, **kwargs):
@@ -182,7 +180,7 @@ class Tracker:
         self.steps += 1
         self.episode_return += reward
         for logger in self.loggers:
-            logger.on_step(self.epoch, action=action, reward=reward)
+            logger.on_step(action=action, reward=reward)
 
     def end_epoch(self, losses: dict or None = None):
         self.epoch += 1

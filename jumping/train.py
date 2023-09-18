@@ -118,7 +118,7 @@ def main(hyperparams: dict, train_dir: str, experiment_id: str):
                      "Test loss": test_err, "Learning rate": lr_decay.get_last_lr()[0]}
         wandb.log(loss_dict, step=step)
         losses.append(loss_dict)
-        if step % 10 == 0:
+        if step % 50 == 0:
             lr_decay.step()
 
         print(f"Iteration {step}. Loss: {total_err:2.3f}")

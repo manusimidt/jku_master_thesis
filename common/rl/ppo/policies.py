@@ -29,7 +29,7 @@ class ActorNet(nn.Module):
 
         self.fc = nn.Sequential(
             nn.Linear(feature_shape, hidden_size),
-            nn.LayerNorm(hidden_size, elementwise_affine=False),
+            #nn.LayerNorm(hidden_size, elementwise_affine=False),
             nn.ReLU(),
             nn.Linear(hidden_size, action_space)
         )
@@ -67,7 +67,7 @@ class CriticNet(nn.Module):
 
         self.fc = nn.Sequential(
             nn.Linear(feature_shape, hidden_size),
-            nn.LayerNorm(hidden_size, elementwise_affine=False),
+            #nn.LayerNorm(hidden_size, elementwise_affine=False),
             nn.ReLU(),
             nn.Linear(hidden_size, 1)
         )

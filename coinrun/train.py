@@ -92,7 +92,7 @@ def main(hyperparams: dict, train_dir: str, experiment_id: str):
 
     loss_bc = nn.CrossEntropyLoss()
 
-    buffer = CoinRunReplayBuffer(device, hyperparams['seed'], './dataset/62')
+    buffer = CoinRunReplayBuffer(device, hyperparams['seed'], './coinrun/dataset/62')
 
     for step in range(hyperparams['n_iterations']):
         # Sample a pair of training MDPs
@@ -153,7 +153,7 @@ if __name__ == '__main__':
 
     parser.add_argument("-lr", "--learning_rate", default=0.0026, type=float,
                         help="Learning rate for the optimizer")
-    parser.add_argument("-K", "--n_iterations", default=100_000, type=int,
+    parser.add_argument("-K", "--n_iterations", default=20_000, type=int,
                         help="Number of total training steps")
 
     parser.add_argument("-a1", "--alpha1", default=5., type=float,
@@ -165,7 +165,7 @@ if __name__ == '__main__':
     parser.add_argument("-b", "--beta", default=1.0, type=float,
                         help="Scaling factor for the PSM")
 
-    parser.add_argument("-ld", "--learning_decay", default=0.999, type=float,
+    parser.add_argument("-ld", "--learning_decay", default=1, type=float,
                         help="learning rate decay")
 
     parser.add_argument("-wd", "--weight_decay", default=0.0, type=float,
