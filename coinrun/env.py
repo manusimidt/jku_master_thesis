@@ -42,7 +42,7 @@ class CoinRunReplayBuffer:
     def __init__(self, device, seed, data_dir):
         self.device = device
         self.data_dir = data_dir
-        self.buffer_size = self._calc_buffer_size()  # Size of the imitation dataset i downloaded
+        self.buffer_size = self._calc_buffer_size() 
         self.rng = np.random.default_rng(seed=seed)
 
         self.states = torch.empty((self.buffer_size, 3, 64, 64), device=device, dtype=torch.float32)
@@ -65,6 +65,7 @@ class CoinRunReplayBuffer:
             with np.load(self.data_dir + os.sep + file) as data:
                 self.episode_start_idx.append(i)
                 for image, action in zip(data['state'], data['action']):
+                    image = np.array(np.moveaxis(image, -1, -3) / 255, dtype=np.float32)
                     self.states[i] = torch.tensor(image, device=self.device)
                     self.actions[i] = torch.tensor(action, device=self.device)
                     i += 1
@@ -93,7 +94,7 @@ class CoinRunReplayBuffer:
 
 
 if __name__ == '__main__':
-    buffer = CoinRunReplayBuffer('cpu', 0, './dataset/62')
+    buffer = CoinRunReplayBuffer('cpu', 0, './coinrun/dataset/seeds-0-9')
     print(buffer.sample(batch_size=23)[0].shape)
     print(buffer.sample_trajectory()[0].shape)
 
