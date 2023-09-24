@@ -5,7 +5,7 @@ import numpy as np
 import os
 
 
-SEEDS = list(range(0, 10))
+SEEDS = list(range(120, 130))
 SUCCESSFULL_EPISODES_PER_SEED = 20
 
 def _get_episode_nr(target_folder: str, seed: int) -> int:
@@ -17,7 +17,8 @@ def _get_episode_nr(target_folder: str, seed: int) -> int:
 
 
 for seed in SEEDS:
-    env  = gym.make('procgen:procgen-coinrun-v0', start_level=seed, paint_vel_info=True, num_levels=1)
+    env  = gym.make('procgen:procgen-coinrun-v0', start_level=seed, paint_vel_info=True, num_levels=1, 
+                    distribution_mode="easy")
     
 
     # Initialize Pygame
