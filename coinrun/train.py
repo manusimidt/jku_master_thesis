@@ -92,7 +92,7 @@ def main(hyperparams: dict, train_dir: str, experiment_id: str):
 
     loss_bc = nn.CrossEntropyLoss()
 
-    buffer = CoinRunReplayBuffer(device, hyperparams['seed'], './coinrun/dataset/62')
+    buffer = CoinRunReplayBuffer(device, hyperparams['seed'], './coinrun/expert-dataset/easy')
 
     for step in range(hyperparams['n_iterations']):
         # Sample a pair of training MDPs
@@ -107,22 +107,22 @@ def main(hyperparams: dict, train_dir: str, experiment_id: str):
                      "Test loss": test_err, "Learning rate": lr_decay.get_last_lr()[0]}
         wandb.log(loss_dict, step=step)
         losses.append(loss_dict)
-        if step % 10 == 0:
+        if step % 100 == 0:
             lr_decay.step()
 
         print(f"Iteration {step}. Loss: {total_err:2.3f}")
-        if step % 250 == 0:
-            solved_train, avg_reward_train, avg_steps_train = validate(net, start_level=0, num_levels=100)
-            solved_test, avg_reward_test, avg_steps_test = validate(net, start_level=1000000, num_levels=100)
-            wandb.log({
-                "solved_train": solved_train,
-                "solved_test": solved_test,
-                "avg_reward_train": avg_reward_train,
-                "avg_reward_test": avg_reward_test,
-                "avg_steps_train": avg_steps_train,
-                "avg_steps_test": avg_steps_test,
+        #if step % 1000 == 0 and step != 0:
+        #    solved_train, avg_reward_train, avg_steps_train = validate(net, start_level=0, num_levels=20)
+        #    solved_test, avg_reward_test, avg_steps_test = validate(net, start_level=1000000, num_levels=20)
+        #    wandb.log({
+        #        "solved_train": solved_train,
+        #        "solved_test": solved_test,
+        #        "avg_reward_train": avg_reward_train,
+        #        "avg_reward_test": avg_reward_test,
+        #        "avg_steps_train": avg_steps_train,
+        #        "avg_steps_test": avg_steps_test,
 
-            }, step=step)
+        #    }, step=step)
     state = {
         'state_dict': net.state_dict(),
         'optimizer': optimizer.state_dict(),
@@ -151,9 +151,9 @@ if __name__ == '__main__':
     parser.add_argument("-bs", "--batch_size", default=256, type=int,
                         help="Size of one Minibatch")
 
-    parser.add_argument("-lr", "--learning_rate", default=0.0026, type=float,
+    parser.add_argument("-lr", "--learning_rate", default=0.006, type=float,
                         help="Learning rate for the optimizer")
-    parser.add_argument("-K", "--n_iterations", default=20_000, type=int,
+    parser.add_argument("-K", "--n_iterations", default=40_000, type=int,
                         help="Number of total training steps")
 
     parser.add_argument("-a1", "--alpha1", default=5., type=float,
@@ -165,7 +165,7 @@ if __name__ == '__main__':
     parser.add_argument("-b", "--beta", default=1.0, type=float,
                         help="Scaling factor for the PSM")
 
-    parser.add_argument("-ld", "--learning_decay", default=1, type=float,
+    parser.add_argument("-ld", "--learning_decay", default=0.999, type=float,
                         help="learning rate decay")
 
     parser.add_argument("-wd", "--weight_decay", default=0.0, type=float,
