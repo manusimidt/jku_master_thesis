@@ -28,6 +28,12 @@ TRAIN_CONFIGURATIONS = {
         (28, 13), (30, 13), (32, 13), (34, 13), (36, 13), (38, 13),
         (28, 15), (30, 15), (32, 15), (34, 15), (36, 15), (38, 15),
         (28, 17), (30, 17), (32, 17), (34, 17), (36, 17), (38, 17),
+    },
+    "random_grid": {
+        # (obstacle_pos, floor_height)
+        (30, 17), (28, 14), (34, 19), (27, 10), (40, 17), (20, 20),
+        (34, 17), (37, 18), (42, 20), (31, 13), (41, 18), (38, 20),
+        (35, 17), (43, 10), (30, 12), (36, 19), (32, 15), (21, 11),
     }
 }
 
@@ -51,7 +57,7 @@ class VanillaEnv(gym.Env):
     # min_floor_height = 0
     # max_floor_height = 48
 
-    def __init__(self, configurations: List[tuple] or None = None, rendering=False):
+    def __init__(self, configurations: List[tuple] or None = None, rendering=False, two_obstacles=False):
         """
         :param configurations: possible configurations, array of tuples consisting of
             the obstacle position and the floor height
@@ -61,6 +67,7 @@ class VanillaEnv(gym.Env):
         if configurations is None:
             configurations = [(30, 10), ]
         self.configurations = configurations
+        self.two_obstacles = two_obstacles
 
         # Jumping env has 2 possible actions
         self.num_actions = 2
@@ -83,7 +90,7 @@ class VanillaEnv(gym.Env):
 
     def reset(self, **kwargs) -> np.ndarray:
         conf = self._sample_conf()
-        obs = self.actualEnv._reset(obstacle_position=conf[0], floor_height=conf[1])
+        obs = self.actualEnv._reset(obstacle_position=conf[0], floor_height=conf[1], two_obstacles=self.two_obstacles)
         return np.expand_dims(obs, axis=0)
 
     def render(self, mode="human"):
@@ -173,6 +180,7 @@ def generate_expert_episode(env, numpy=True):
     step = 0
     while not done:
         action = 1 if step == jumping_pixel else 0
+        if env.two_obstacles and step == 38: action = 1
         next_obs, reward, done, info = env.step(action)
         assert bool(info['collision']) is False, "Trajectory not optimal!"
         states.append(obs)
