@@ -25,8 +25,11 @@ def plot_evaluation_grid(grid, training_positions):
     ax.set_xticks(x_ticks)
     ax.set_yticks(y_ticks)
 
-    ax.set_ylabel("Floor height")
-    ax.set_xlabel("Obstacle position")
+    ax.set_yticklabels([])
+    ax.set_xticklabels([])
+
+    #ax.set_ylabel("Floor height")
+    #ax.set_xlabel("Obstacle position")
 
     # Loop over data dimensions and create text annotations.
     for (obstacle_pos, floor_height) in training_positions:

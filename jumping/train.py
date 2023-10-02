@@ -90,10 +90,10 @@ def main(hyperparams: dict, train_dir: str, experiment_id: str):
                       "explicit": contrastive_loss_explicit}
     loss_func = loss_functions[hyperparams["loss"]]
     # psm_func = psm.dummy_psm
-    if hyperparams["conf"] == "random_grid":
-        training_conf = gen_rand_grid()
-    else:
-        training_conf = list(TRAIN_CONFIGURATIONS[hyperparams["conf"]])
+    # if hyperparams["conf"] == "random_grid":
+    #    training_conf = gen_rand_grid()
+    # else:
+    training_conf = list(TRAIN_CONFIGURATIONS[hyperparams["conf"]])
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print("Training on ", device)

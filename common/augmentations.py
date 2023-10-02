@@ -34,7 +34,6 @@ def rand_conv(images: torch.Tensor):
     return torch.clip(aug_images, images.min(), images.max())
 
 
-
 def random_translate(images: torch.tensor, size=65, h1s=None, w1s=None) -> torch.Tensor:
     """
     # Taken from https://github.com/MishaLaskin/rad
@@ -109,7 +108,7 @@ def random_cutout(images: torch.tensor, min_cut=10, max_cut=25) -> torch.tensor:
     return cutouts
 
 
-def gaussian_blur(images: torch.tensor, kernel_size: int = 3, sigma: float = .5) -> torch.tensor:
+def gaussian_blur(images: torch.tensor, kernel_size: int = 3, sigma: float = .6) -> torch.tensor:
     transform = T.GaussianBlur(kernel_size=kernel_size, sigma=sigma)
     blur_img = transform(images)
 
@@ -121,6 +120,10 @@ def random_noise(images: torch.tensor, strength=0.05) -> torch.tensor:
     noise = torch.normal(0, strength, size=images.shape, device=images.device)
     # make sure we dont have illegal pixel values (i.e.: 255.3 or 1.1)
     return torch.clip(images + noise, torch.min(images), torch.max(images))
+
+
+def blur_and_noise(images: torch.tensor) -> torch.tensor:
+    return random_noise(gaussian_blur(images))
 
 
 def identity(images: any) -> any:
@@ -136,4 +139,5 @@ aug_map = {
     "cutout": random_cutout,
     "blur": gaussian_blur,
     "noise": random_noise,
+    "blur_noise": blur_and_noise
 }
