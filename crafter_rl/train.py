@@ -150,7 +150,7 @@ if __name__ == '__main__':
     parser.add_argument("-K", "--n_iterations", default=1_000_000, type=int,
                         help="Number of total training steps")
 
-    parser.add_argument("-a1", "--alpha1", default=3, type=float,
+    parser.add_argument("-a1", "--alpha1", default=0, type=float,
                         help="Scaling factor for the alignment loss")
 
     parser.add_argument("-a2", "--alpha2", default=1., type=float,
@@ -159,7 +159,7 @@ if __name__ == '__main__':
     parser.add_argument("-b", "--beta", default=1.0, type=float,
                         help="Scaling factor for the PSM")
 
-    parser.add_argument("-ld", "--learning_decay", default=0.9995, type=float,
+    parser.add_argument("-ld", "--learning_decay", default=0.9997, type=float,
                         help="learning rate decay")
 
     parser.add_argument("-wd", "--weight_decay", default=0.0, type=float,

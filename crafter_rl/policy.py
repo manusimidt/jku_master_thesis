@@ -22,10 +22,8 @@ class ActorNet(nn.Module):
 
         # projection head (for the contrastive loss)
         self.g = nn.Sequential(
-            nn.Linear(512, 256),
-            nn.ReLU(),
             nn.Linear(256, 128),
-            nn.LayerNorm(128),
+            nn.ReLU(),
         )
 
         # The downstream task (the actual actor)
@@ -60,19 +58,21 @@ class ActorFCNet(ActorNet):
         self.f = nn.Sequential(
             # in 1 x 9 x 9
             nn.Flatten(),
-            nn.Linear(81, 256),
+            nn.Linear(81, 512),
             nn.ReLU(),
-            nn.Linear(256, 128),
+            nn.Linear(512, 256),
             nn.ReLU(),
         )
 
         # projection head (for the contrastive loss)
         self.g = nn.Sequential(
-            nn.Linear(128, 64),
+            nn.Linear(256, 128),
         )
 
         # The downstream task (the actual actor)
         self.d = nn.Sequential(
+            nn.Linear(256, 128),
+            nn.ReLU(),
             nn.Linear(128, 17),
         )
 
