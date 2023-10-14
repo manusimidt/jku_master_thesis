@@ -15,9 +15,9 @@ from torchvision.transforms.functional import InterpolationMode
 class VanillaEnv(gym.Env):
     metadata = {"render.modes": ["human"]}
 
-    def __init__(self, seed):
+    def __init__(self, seed, semantic=False):
         super().__init__()
-
+        self.semantic = semantic
         self.num_actions = 17
         self.action_space = spaces.Discrete(self.num_actions)
         self.observation_space = spaces.Box(low=0, high=1,
@@ -32,11 +32,28 @@ class VanillaEnv(gym.Env):
 
     def step(self, action) -> tuple:
         obs, r, done, info = self.actualEnv.step(action)
-        return np.array(np.moveaxis(obs, -1, -3) / 255, dtype=np.float32), float(r), done, info
+        if self.semantic:
+            local_semantic = create_local_semantic(
+                info['semantic'], info['player_pos'][0], info['player_pos'][1],
+                info['inventory']['health'], info['inventory']['food'],
+                info['inventory']['drink'], info['inventory']['energy'],
+                info['inventory']['sapling'], info['inventory']['wood'],
+                info['inventory']['stone'], info['inventory']['coal'],
+                info['inventory']['iron'], info['inventory']['diamond'],
+                info['inventory']['wood_pickaxe'], info['inventory']['stone_pickaxe'],
+                info['inventory']['iron_pickaxe'], info['inventory']['wood_sword'],
+                info['inventory']['stone_sword'], info['inventory']['iron_sword'],
+            )
+            return local_semantic.astype(np.float32).reshape((1, 9, 9)), float(r), done, info
+        else:
+            return np.array(np.moveaxis(obs, -1, -3) / 255, dtype=np.float32), float(r), done, info
 
     def reset(self) -> np.ndarray:
         obs = self.actualEnv.reset()
-        return np.array(np.moveaxis(obs, -1, -3) / 255, dtype=np.float32)
+        if self.semantic:
+            return np.zeros((1, 9, 9), dtype=np.float32)
+        else:
+            return np.array(np.moveaxis(obs, -1, -3) / 255, dtype=np.float32)
 
     def render(self, mode="human"):
         pass
@@ -45,22 +62,43 @@ class VanillaEnv(gym.Env):
         self.actualEnv.close()
 
 
+def create_local_semantic(global_semantic, player_x, player_y, health, food, water, energy, sapling, wood, stone, coal,
+                          iron, diamond, wood_pix, stone_pix, iron_pix, wood_swo, stone_swo, iron_swo):
+    global_semantic = np.pad(global_semantic, (5, 5), constant_values=(0, 0))
+    player_obs = global_semantic[player_x - 4 + 5:player_x + 5 + 5, player_y - 3 + 5:player_y + 4 + 5]
+    inventory = np.array([health, food, water, energy,
+                          sapling, wood, stone, coal,
+                          iron, diamond, wood_pix, stone_pix,
+                          iron_pix, wood_swo, stone_swo, iron_swo, 0, 0]).reshape(2, 9, 1)
+    player_obs = np.append(player_obs, inventory[0], 1)
+    player_obs = np.append(player_obs, inventory[1], 1)
+
+    mean = 3.04432
+    std_dev = 2.95620
+    return (player_obs - mean) / std_dev
+
+    # return player_obs / 18
+
+
 class CrafterReplayBuffer:
-    def __init__(self, device, seed, data_dir):
+    def __init__(self, device, seed, data_dir, sematic=False):
         self.device = device
         self.seed = seed
         self.data_dir = data_dir
-        self.buffer_size = 62002  # Size of the imitation dataset i downloaded
         self.rng = np.random.default_rng(seed=seed)
-
-        self.states = torch.empty((self.buffer_size, 3, 64, 64), device=device, dtype=torch.float32)
+        self.semantic = sematic
+        self.buffer_size = 62002 - 100 if sematic else 62002  # Size of the imitation dataset i downloaded
         self.actions = torch.empty(self.buffer_size, device=device, dtype=torch.int64)
-
         self.episode_start_idx = []
 
-        self._populate()
+        if not sematic:
+            self.states = torch.empty((self.buffer_size, 3, 64, 64), device=device, dtype=torch.float32)
+            self._populate_image()
+        else:
+            self.states = torch.empty((self.buffer_size, 1, 9, 9), device=device, dtype=torch.float32)
+            self._populate_semantic()
 
-    def _populate(self):
+    def _populate_image(self):
         i = 0
         for file in os.listdir(self.data_dir):
             with np.load(self.data_dir + os.sep + file) as data:
@@ -68,6 +106,17 @@ class CrafterReplayBuffer:
                 for image, action in zip(data['image'], data['action']):
                     self.states[i] = torch.tensor(np.moveaxis(image, -1, -3) / 255, dtype=torch.float32,
                                                   device=self.device)
+                    self.actions[i] = torch.tensor(action, device=self.device)
+                    i += 1
+        assert i == self.buffer_size, "Not all data was loaded!"
+
+    def _populate_semantic(self):
+        i = 0
+        for file in os.listdir(self.data_dir):
+            with np.load(self.data_dir + os.sep + file) as data:
+                self.episode_start_idx.append(i)
+                for semantic, action in zip(data['local_semantics'], data['actions']):
+                    self.states[i] = torch.tensor(semantic, dtype=torch.float32, device=self.device).unsqueeze(dim=0)
                     self.actions[i] = torch.tensor(action, device=self.device)
                     i += 1
         assert i == self.buffer_size, "Not all data was loaded!"
@@ -122,14 +171,28 @@ def simplify_actions(actions: torch.tensor) -> torch.tensor:
 
 
 if __name__ == '__main__':
-    buffer = CrafterReplayBuffer('cuda', 0, './dataset')
+    buffer = CrafterReplayBuffer('cuda', 5, './dataset')
     _states, _actions = buffer.sample(batch_size=23)
-    simplify_actions(_actions)
-    buffer.sample_trajectory()
+    print(f"States shape {_states.shape}, device: {_states.device}, actions shape {_actions.shape}")
+    _states, _actions = buffer.sample_trajectory()
+    print(f"States shape {_states.shape}, device: {_states.device}, actions shape {_actions.shape}")
 
-    _envs = [VanillaEnv()]
-    for _env in _envs:
-        _obs_arr = [_env.reset(), _env.step(0)[0], _env.step(0)[0], _env.step(0)[0], _env.step(1)[0]]
-        for _obs in _obs_arr:
-            assert _obs.dtype == np.float32, "Incorrect datatype"
-            assert _obs.shape == (3, 64, 64), "Incorrect shape"
+    buffer = CrafterReplayBuffer('cuda', 5, './dataset-semantic', sematic=True)
+    _states, _actions = buffer.sample(batch_size=23)
+    print(f"States shape {_states.shape}, device: {_states.device}, actions shape {_actions.shape}")
+    _states, _actions = buffer.sample_trajectory()
+    print(f"States shape {_states.shape}, device: {_states.device}, actions shape {_actions.shape}")
+
+    simplify_actions(_actions)
+
+    _env = VanillaEnv(seed=2)
+    _obs_arr = [_env.reset(), _env.step(0)[0], _env.step(0)[0], _env.step(0)[0], _env.step(1)[0]]
+    for _obs in _obs_arr:
+        assert _obs.dtype == np.float32, "Incorrect datatype"
+        assert _obs.shape == (3, 64, 64), "Incorrect shape"
+
+    _env = VanillaEnv(seed=2, semantic=True)
+    _obs_arr = [_env.reset(), _env.step(0)[0], _env.step(0)[0], _env.step(0)[0], _env.step(1)[0]]
+    for _obs in _obs_arr:
+        assert _obs.dtype == np.float32, "Incorrect datatype"
+        assert _obs.shape == (1, 9, 9), "Incorrect shape"

@@ -51,3 +51,28 @@ class ActorNet(nn.Module):
             else:
                 # Stop gradient backpropagation from downstream task layer into embedding
                 return self.d(h.detach())
+
+
+class ActorFCNet(ActorNet):
+    def __init__(self):
+        super(ActorFCNet, self).__init__()
+        # feature extractor aka base encoder network
+        self.f = nn.Sequential(
+            # in 1 x 9 x 9
+            nn.Flatten(),
+            nn.Linear(81, 256),
+            nn.ReLU(),
+            nn.Linear(256, 128),
+            nn.ReLU(),
+        )
+
+        # projection head (for the contrastive loss)
+        self.g = nn.Sequential(
+            nn.Linear(128, 64),
+        )
+
+        # The downstream task (the actual actor)
+        self.d = nn.Sequential(
+            nn.Linear(128, 17),
+        )
+

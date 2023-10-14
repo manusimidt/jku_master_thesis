@@ -6,16 +6,17 @@ from crafter_rl.env import VanillaEnv
 from crafter_rl.policy import ActorNet
 
 
-def validate(model: ActorNet, device, iterations=10):
+def validate(model: ActorNet, device, semantic=False, iterations=10):
     returns = []
     steps = []
     achievements = defaultdict(lambda: [])
     inventory = defaultdict(lambda: [])
 
-    for seed in np.random.randint(low=0, high=np.iinfo(np.int32).max, size=iterations):
+    # for seed in np.random.randint(low=0, high=np.iinfo(np.int32).max, size=iterations):
+    for seed in np.random.randint(low=0, high=4, size=iterations):
         # needed to average over the entire episode
         curr_inventory = defaultdict(lambda: [])
-        env = VanillaEnv(seed=seed)
+        env = VanillaEnv(seed=seed, semantic=semantic)
 
         state = env.reset()
         done = False

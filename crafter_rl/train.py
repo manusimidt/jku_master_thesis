@@ -16,7 +16,7 @@ import common.psm as psm
 from common import set_seed, get_date_str, augmentations
 from crafter_rl.env import CrafterReplayBuffer, simplify_actions
 from common.training_helpers import contrastive_loss_repository, cosine_similarity
-from crafter_rl.policy import ActorNet
+from crafter_rl.policy import ActorNet, ActorFCNet
 from crafter_rl.validate import validate
 
 
@@ -30,8 +30,8 @@ def train(net, optim, alpha1, alpha2, beta, inv_temp, psm_func, buffer, loss_bc,
         statesX, actionsX = buffer.sample_trajectory()
         statesY, actionsY = buffer.sample_trajectory()
 
-        actionsX = simplify_actions(actionsX)
-        actionsY = simplify_actions(actionsY)
+        # actionsX = simplify_actions(actionsX)
+        # actionsY = simplify_actions(actionsY)
 
         statesX, statesY = augmentation(statesX), augmentation(statesY)
 
@@ -86,13 +86,16 @@ def main(hyperparams: dict, train_dir: str, experiment_id: str):
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print("Training on ", device)
-    net = ActorNet().to(device)
+    net = ActorFCNet().to(device) if hyperparams['semantic'] else ActorNet().to(device)
     optimizer = optim.Adam(net.parameters(), lr=hyperparams['learning_rate'])
     lr_decay = optim.lr_scheduler.ExponentialLR(optimizer=optimizer, gamma=hyperparams['learning_decay'])
 
     loss_bc = nn.CrossEntropyLoss()
 
-    buffer = CrafterReplayBuffer(device, hyperparams['seed'], './crafter_rl/dataset')
+    if hyperparams['semantic']:
+        buffer = CrafterReplayBuffer(device, hyperparams['seed'], './dataset-semantic', hyperparams['semantic'])
+    else:
+        buffer = CrafterReplayBuffer(device, hyperparams['seed'], './dataset', hyperparams['semantic'])
 
     for step in range(hyperparams['n_iterations']):
         # Sample a pair of training MDPs
@@ -104,14 +107,14 @@ def main(hyperparams: dict, train_dir: str, experiment_id: str):
         test_err = evaluate(net, buffer, hyperparams['batch_size'])
 
         loss_dict = {"Total loss": total_err, "Contrastive loss": contrastive_err, "BC loss": cross_entropy_err,
-                     "Test loss": test_err}
+                     "Test loss": test_err, "Learning rate": lr_decay.get_last_lr()[0]}
         wandb.log(loss_dict, step=step)
         losses.append(loss_dict)
-        if step % 10 == 0:
+        if step % 100 == 0:
             lr_decay.step()
 
         if step % 1000 == 0:
-            returns, steps, achievements, inventory = validate(net, device)
+            returns, steps, achievements, inventory = validate(net, device, semantic=hyperparams['semantic'])
             wandb.log({"Avg. Returns": returns, "Avg. Steps": steps}, step=step)
             wandb.log({'ach/' + k: v for k, v in achievements.items()}, step=step)
             wandb.log({'inv/' + k: v for k, v in inventory.items()}, step=step)
@@ -136,25 +139,18 @@ if __name__ == '__main__':
     parser.add_argument("--train_dir", default=f'./experiments/{get_date_str()}/',
                         help="The directory to store the results from this run into")
 
-    parser.add_argument("-c", "--conf", choices=["narrow_grid", "wide_grid"], default="wide_grid",
-                        help="The environment configuration to train on")
-
     parser.add_argument("-psm", "--psm", choices=["f", "fb"], default="f",
                         help="The PSM distance function to use (f=forward PSM, fb=forward-backward PSM)")
 
     parser.add_argument("-bs", "--batch_size", default=256, type=int,
                         help="Size of one Minibatch")
 
-    parser.add_argument("--balanced", default=True, type=bool, action=argparse.BooleanOptionalAction,
-                        help="If true, the algorithm will be trained on a balanced dataset (1/3 action 1, 2/3 action 0 "
-                             "examples)")
-
-    parser.add_argument("-lr", "--learning_rate", default=0.01, type=float,
+    parser.add_argument("-lr", "--learning_rate", default=0.004, type=float,
                         help="Learning rate for the optimizer")
-    parser.add_argument("-K", "--n_iterations", default=100_000, type=int,
+    parser.add_argument("-K", "--n_iterations", default=1_000_000, type=int,
                         help="Number of total training steps")
 
-    parser.add_argument("-a1", "--alpha1", default=.5, type=float,
+    parser.add_argument("-a1", "--alpha1", default=3, type=float,
                         help="Scaling factor for the alignment loss")
 
     parser.add_argument("-a2", "--alpha2", default=1., type=float,
@@ -163,7 +159,7 @@ if __name__ == '__main__':
     parser.add_argument("-b", "--beta", default=1.0, type=float,
                         help="Scaling factor for the PSM")
 
-    parser.add_argument("-ld", "--learning_decay", default=0.999, type=float,
+    parser.add_argument("-ld", "--learning_decay", default=0.9995, type=float,
                         help="learning rate decay")
 
     parser.add_argument("-wd", "--weight_decay", default=0.0, type=float,
@@ -172,13 +168,16 @@ if __name__ == '__main__':
     parser.add_argument("-l", "--lambda", default=0.5, type=float,
                         help="Inverse temperature")
 
-    parser.add_argument("-aug", "--augmentation", default="conv",
+    parser.add_argument("-aug", "--augmentation", default="identity",
                         choices=list(augmentations.aug_map.keys()),
                         help="The augmentation that should be applied to the states")
 
     parser.add_argument("-s", "--seed", default=[1], type=int, nargs='+',
                         help="The seed to train on. If multiple values are provided, the script will "
                              "spawn a new process for each seed")
+
+    parser.add_argument("--semantic", default=True, type=bool, action=argparse.BooleanOptionalAction,
+                        help="If true, the model will train only on semantic representations rather than images")
 
     args = parser.parse_args()
     _hyperparams = copy.deepcopy(vars(args))
