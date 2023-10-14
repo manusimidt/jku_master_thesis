@@ -123,7 +123,7 @@ def random_noise(images: torch.tensor, strength=0.05) -> torch.tensor:
 
 
 def blur_and_noise(images: torch.tensor) -> torch.tensor:
-    return random_noise(gaussian_blur(images))
+    return random_noise(gaussian_blur(images, sigma=.7))
 
 
 def identity(images: any) -> any:

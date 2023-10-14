@@ -7,14 +7,14 @@ class CoinRunActor(nn.Module):
         # feature extractor aka base encoder network
         self.f = nn.Sequential(
             # in 3 x 64 x 64
-            nn.Conv2d(in_channels=3, out_channels=32, kernel_size=5, stride=2),  # 32x30x30
+            nn.Conv2d(in_channels=3, out_channels=32, kernel_size=3, stride=2),  # 32x31x31
             nn.ReLU(),
-            nn.Conv2d(in_channels=32, out_channels=64, kernel_size=5, stride=2),  # 64x13x13
+            nn.Conv2d(in_channels=32, out_channels=64, kernel_size=3, stride=2),  # 64x15x15
             nn.ReLU(),
-            nn.Conv2d(in_channels=64, out_channels=64, kernel_size=5, stride=2),  # 64x5x5
+            nn.Conv2d(in_channels=64, out_channels=64, kernel_size=3, stride=3),  # 64x5x5
             nn.Flatten(),
             nn.ReLU(),
-            nn.Linear(64 * 5 * 5, 512),
+            nn.Linear(64 * 5 * 5, 256),
             nn.ReLU(),
             #nn.LayerNorm(512),
             # nn.Dropout(p=.4),
@@ -22,17 +22,13 @@ class CoinRunActor(nn.Module):
 
         # projection head (for the contrastive loss)
         self.g = nn.Sequential(
-            nn.Linear(512, 256),
-            nn.ReLU(),
             nn.Linear(256, 128),
             #nn.LayerNorm(128),
         )
 
         # The downstream task (the actual actor)
         self.d = nn.Sequential(
-            nn.Linear(512, 256),
-            nn.ReLU(),
-            nn.Linear(256, 15),
+            nn.Linear(256, 15)
         )
 
     def disable_embedding_weights(self):
