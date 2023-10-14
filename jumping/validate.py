@@ -6,7 +6,7 @@ from jumping.env import VanillaEnv, obstacle_pos, floor_height
 from jumping.policy import ActorNet
 
 
-def validate(model: ActorNet, device, train_configurations):
+def validate(model: ActorNet, device, train_configurations, two_obstacles):
     model.eval()
     grid = np.zeros((len(obstacle_pos), len(floor_height)))
 
@@ -21,7 +21,7 @@ def validate(model: ActorNet, device, train_configurations):
 
             is_train_conf = (curr_obs_pos, curr_floor_height) in train_configurations
 
-            env = VanillaEnv([(curr_obs_pos, curr_floor_height), ])
+            env = VanillaEnv([(curr_obs_pos, curr_floor_height), ], two_obstacles=two_obstacles)
 
             done = False
             obs = env.reset()

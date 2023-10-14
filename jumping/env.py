@@ -34,7 +34,8 @@ TRAIN_CONFIGURATIONS = {
         (30, 17), (28, 14), (34, 19), (27, 10), (40, 17), (20, 20),
         (34, 17), (37, 18), (42, 20), (31, 13), (41, 18), (38, 20),
         (35, 17), (43, 10), (30, 12), (36, 19), (32, 15), (21, 11),
-    }
+    },
+    "singleton": {(32, 15)}
 }
 
 
@@ -103,8 +104,9 @@ class VanillaEnv(gym.Env):
 class JumpingExpertBuffer:
     """ A simple BC replay buffer to store episodes (without storing next_state) """
 
-    def __init__(self, training_pos: [tuple], device, seed):
+    def __init__(self, training_pos: [tuple], device, seed, two_obstacles=False):
         self.training_pos = training_pos
+        self.two_obstacles = two_obstacles
         self.device = device
         self.seed = seed
         self.buffer_size = len(training_pos) * 56  # There are 56 steps in an optimal episode
@@ -112,7 +114,6 @@ class JumpingExpertBuffer:
 
         self.states = torch.empty((self.buffer_size, 1, 60, 60), device=device, dtype=torch.float32)
         self.actions = torch.empty(self.buffer_size, device=device, dtype=torch.int64)
-
         # Stores the indices of the jumping states/actions. For faster sampling
         self.jump_idx = []
         self._populate()
@@ -122,14 +123,15 @@ class JumpingExpertBuffer:
         env = JumpTaskEnv()
 
         for pos in self.training_pos:
-            jumping_pixel = pos[0] - 14
-
             done = False
-            obs = env._reset(obstacle_position=pos[0], floor_height=pos[1])
+            obs = env._reset(obstacle_position=pos[0], floor_height=pos[1], two_obstacles=self.two_obstacles)
+            jumping_pixel = env.obstacle_position - 14
             step = 0
 
             while not done:
                 action = 1 if step == jumping_pixel else 0
+                if self.two_obstacles and step == 38:
+                    action = 1
                 next_obs, reward, done, info = env.step(action)
                 assert bool(info['collision']) is False, "Trajectory not optimal!"
 
@@ -217,7 +219,7 @@ def generate_positive_pairs(envs: [VanillaEnv]):
 
 
 if __name__ == '__main__':
-    buffer = JumpingExpertBuffer(TRAIN_CONFIGURATIONS['wide_grid'], 'cuda', 3)
+    buffer = JumpingExpertBuffer(TRAIN_CONFIGURATIONS['wide_grid'], 'cuda', 3, two_obstacles=True)
     _states, _actions = buffer.sample(256, balanced=True)
     buffer.sample_trajectory()
     _envs = [VanillaEnv()]

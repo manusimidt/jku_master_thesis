@@ -4,6 +4,7 @@ import json
 import os
 from multiprocessing import Pool
 
+import numpy as np
 import pandas as pd
 import torch
 import torch.nn as nn
@@ -27,7 +28,8 @@ from common.training_helpers import cosine_similarity, pairwise_distance, contra
 def train(net, optim, alpha1, alpha2, beta, inv_temp, psm_func, loss_func, buffer, balanced, loss_bc, batch_size,
           augmentation=augmentations.identity):
     net.train()
-    alignment_loss = cross_entropy_loss = torch.tensor(0)
+    alignment_loss, cross_entropy_loss = torch.tensor(0), torch.tensor(0)
+    metric_values, similarity_matrix = None, None
 
     if alpha1 != 0:
         statesX, actionsX = buffer.sample_trajectory()
@@ -57,7 +59,7 @@ def train(net, optim, alpha1, alpha2, beta, inv_temp, psm_func, loss_func, buffe
     total_loss.backward()
     optim.step()
 
-    return total_loss.item(), alignment_loss.item(), cross_entropy_loss.item()
+    return total_loss.item(), alignment_loss.item(), cross_entropy_loss.item(), metric_values, similarity_matrix
 
 
 @torch.no_grad()
@@ -103,7 +105,7 @@ def main(hyperparams: dict, train_dir: str, experiment_id: str):
 
     loss_bc = nn.CrossEntropyLoss()
 
-    buffer = JumpingExpertBuffer(training_conf, device, hyperparams['seed'])
+    buffer = JumpingExpertBuffer(training_conf, device, hyperparams['seed'], two_obstacles=hyperparams['two_obstacles'])
 
     for step in range(hyperparams['n_iterations']):
         # Sample a pair of training MDPs
@@ -111,7 +113,7 @@ def main(hyperparams: dict, train_dir: str, experiment_id: str):
                      hyperparams['lambda'], psm_func, loss_func, buffer, hyperparams['balanced'], loss_bc,
                      hyperparams['batch_size'], augmentations.aug_map[hyperparams['augmentation']])
 
-        total_err, contrastive_err, cross_entropy_err = info
+        total_err, contrastive_err, cross_entropy_err, metric_values, similarity_matrix = info
         test_err = evaluate(net, buffer, hyperparams['batch_size'])
 
         loss_dict = {"Total loss": total_err, "Contrastive loss": contrastive_err, "BC loss": cross_entropy_err,
@@ -122,8 +124,8 @@ def main(hyperparams: dict, train_dir: str, experiment_id: str):
             lr_decay.step()
 
         print(f"Iteration {step}. Loss: {total_err:2.3f}")
-        if step % 250 == 0:
-            grid, train_perf, test_perf, total_perf, avg_jumps = validate(net, device, training_conf)
+        if step % 500 == 0:
+            grid, train_perf, test_perf, total_perf, avg_jumps = validate(net, device, training_conf, hyperparams['two_obstacles'])
             print(
                 f"Validation: train perf: {train_perf:.3f}, test perf: {test_perf:.3f}, total perf:  {total_perf:.3f}")
             wandb.log({
@@ -131,8 +133,15 @@ def main(hyperparams: dict, train_dir: str, experiment_id: str):
                 "Generalization perf. on test": test_perf,
                 "Total Generalization perf.": total_perf,
                 "Average jumps per episode:": avg_jumps,
-                "Generalization viz": wandb.Image(grid.T)
+                "Generalization viz": wandb.Image(grid.T),
+                "Sim matrix": wandb.Image(similarity_matrix),
+                "Metric values": wandb.Image(metric_values)
             }, step=step)
+            if step % 2000 == 0:
+                similarity_matrix = similarity_matrix.detach().cpu().numpy()
+                metric_values = metric_values.detach().cpu().numpy()
+                np.savez(train_dir + os.sep + run_name + f"-{step}", sim_matrix=similarity_matrix,
+                         metric_values=metric_values)
     state = {
         'state_dict': net.state_dict(),
         'optimizer': optimizer.state_dict(),
@@ -152,7 +161,8 @@ if __name__ == '__main__':
     parser.add_argument("--train_dir", default=f'./experiments/{get_date_str()}/',
                         help="The directory to store the results from this run into")
 
-    parser.add_argument("-c", "--conf", choices=["narrow_grid", "wide_grid", "random_grid"], default="wide_grid",
+    parser.add_argument("-c", "--conf", choices=["narrow_grid", "wide_grid", "random_grid", "singleton"],
+                        default="wide_grid",
                         help="The environment configuration to train on")
 
     parser.add_argument("-psm", "--psm", choices=["f", "fb"], default="f",
@@ -197,6 +207,10 @@ if __name__ == '__main__':
 
     parser.add_argument("-loss", "--loss", choices=["paper", "repository", "explicit"], default="repository",
                         help="which loss to use")
+
+    parser.add_argument("--two_obstacles", default=False, type=bool, action=argparse.BooleanOptionalAction,
+                        help="If true the environment will have two obstacles. Note that this will disable the usage of"
+                             " the obstacle position!")
 
     args = parser.parse_args()
     _hyperparams = copy.deepcopy(vars(args))

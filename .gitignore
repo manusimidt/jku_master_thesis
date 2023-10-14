@@ -10,6 +10,7 @@ __pycache__/
 /coinrun/experiments
 /coinrun/runs
 /crafter_rl/dataset
+/crafter_rl/dataset-semantic
 /crafter_rl/logdir
 /crafter_rl/experiments
 /testdata
