@@ -70,7 +70,7 @@ def psm_fb(x_arr, y_arr, gamma=0.99, window=1e9):
     return storage_fwrd + storage_bwrd
 
 
-def psm_f_fast(actions1, actions2, gamma=0.999, eps=1e-7):
+def psm_f_fast(actions1, actions2, gamma=0.9, eps=1e-7):
     """
     Taken from the PAPER Agarwal et al. 2021
     """
@@ -125,7 +125,7 @@ def psm_f_fast_repo(actions1, actions2, gamma=0.999, eps=1e-7):
     return d_metric
 
 
-def psm_fb_fast(actions1, actions2, gamma=0.999, eps=1e-7):
+def psm_fb_fast(actions1, actions2, gamma=0.9, eps=1e-7):
     """
     Efficient implementation of PSE-FB (inspired by Agarwal et al. 2021)
     """

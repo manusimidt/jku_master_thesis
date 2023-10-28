@@ -59,8 +59,10 @@ class ActorFCNet(ActorNet):
             # in 1 x 9 x 9
             nn.Flatten(),
             nn.Linear(81, 512),
+            nn.LayerNorm(512),
             nn.ReLU(),
             nn.Linear(512, 256),
+            nn.LayerNorm(256),
             nn.ReLU(),
         )
 

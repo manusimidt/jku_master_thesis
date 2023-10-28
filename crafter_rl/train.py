@@ -21,7 +21,7 @@ from crafter_rl.validate import validate
 
 
 @torch.enable_grad()
-def train(net, optim, alpha1, alpha2, beta, inv_temp, psm_func, buffer, loss_bc, batch_size,
+def train(net, optim, alpha1, alpha2, beta, inv_temp, psm_func, buffer, balanced, loss_bc, batch_size,
           augmentation=augmentations.identity):
     net.train()
     alignment_loss = cross_entropy_loss = torch.tensor(0)
@@ -30,8 +30,8 @@ def train(net, optim, alpha1, alpha2, beta, inv_temp, psm_func, buffer, loss_bc,
         statesX, actionsX = buffer.sample_trajectory()
         statesY, actionsY = buffer.sample_trajectory()
 
-        # actionsX = simplify_actions(actionsX)
-        # actionsY = simplify_actions(actionsY)
+        actionsX = simplify_actions(actionsX)
+        actionsY = simplify_actions(actionsY)
 
         statesX, statesY = augmentation(statesX), augmentation(statesY)
 
@@ -43,7 +43,7 @@ def train(net, optim, alpha1, alpha2, beta, inv_temp, psm_func, buffer, loss_bc,
         alignment_loss = contrastive_loss_repository(similarity_matrix, metric_values, inv_temp)
 
     if alpha2 != 0:
-        bc_states, bc_actions = buffer.sample(batch_size)
+        bc_states, bc_actions = buffer.sample(batch_size, balance=balanced)
         bc_states = augmentation(bc_states)
         # if alpha1 is zero, the first layers are not touched by PSE => train them with BC
         states_y_logits = net.forward(bc_states, contrastive=False, full_network=alpha1 == 0)
@@ -93,14 +93,14 @@ def main(hyperparams: dict, train_dir: str, experiment_id: str):
     loss_bc = nn.CrossEntropyLoss()
 
     if hyperparams['semantic']:
-        buffer = CrafterReplayBuffer(device, hyperparams['seed'], './dataset-semantic', hyperparams['semantic'])
+        buffer = CrafterReplayBuffer(device, hyperparams['seed'], './dataset-semantic', sematic=hyperparams['semantic'], remove_noop=False)
     else:
-        buffer = CrafterReplayBuffer(device, hyperparams['seed'], './dataset', hyperparams['semantic'])
+        buffer = CrafterReplayBuffer(device, hyperparams['seed'], './dataset', sematic=hyperparams['semantic'], remove_noop=False)
 
     for step in range(hyperparams['n_iterations']):
         # Sample a pair of training MDPs
         info = train(net, optimizer, hyperparams['alpha1'], hyperparams['alpha2'], hyperparams['beta'],
-                     hyperparams['lambda'], psm_func, buffer, loss_bc, hyperparams['batch_size'],
+                     hyperparams['lambda'], psm_func, buffer, hyperparams['balanced'], loss_bc, hyperparams['batch_size'],
                      augmentations.aug_map[hyperparams['augmentation']])
 
         total_err, contrastive_err, cross_entropy_err = info
@@ -139,18 +139,21 @@ if __name__ == '__main__':
     parser.add_argument("--train_dir", default=f'./experiments/{get_date_str()}/',
                         help="The directory to store the results from this run into")
 
-    parser.add_argument("-psm", "--psm", choices=["f", "fb"], default="f",
+    parser.add_argument("-psm", "--psm", choices=["f", "fb"], default="fb",
                         help="The PSM distance function to use (f=forward PSM, fb=forward-backward PSM)")
 
     parser.add_argument("-bs", "--batch_size", default=256, type=int,
                         help="Size of one Minibatch")
 
+    parser.add_argument("--balanced", default=True, type=bool, action=argparse.BooleanOptionalAction,
+                        help="If true, the algorithm will be trained on a balanced dataset")
+
     parser.add_argument("-lr", "--learning_rate", default=0.004, type=float,
                         help="Learning rate for the optimizer")
-    parser.add_argument("-K", "--n_iterations", default=1_000_000, type=int,
+    parser.add_argument("-K", "--n_iterations", default=500_000, type=int,
                         help="Number of total training steps")
 
-    parser.add_argument("-a1", "--alpha1", default=0, type=float,
+    parser.add_argument("-a1", "--alpha1", default=1, type=float,
                         help="Scaling factor for the alignment loss")
 
     parser.add_argument("-a2", "--alpha2", default=1., type=float,

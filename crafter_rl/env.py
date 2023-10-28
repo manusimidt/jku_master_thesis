@@ -73,24 +73,29 @@ def create_local_semantic(global_semantic, player_x, player_y, health, food, wat
     player_obs = np.append(player_obs, inventory[0], 1)
     player_obs = np.append(player_obs, inventory[1], 1)
 
-    mean = 3.04432
-    std_dev = 2.95620
-    return (player_obs - mean) / std_dev
-
-    # return player_obs / 18
+    # mean = 3.04432
+    # std_dev = 2.95620
+    # return (player_obs - mean) / std_dev
+    return player_obs / 17
 
 
 class CrafterReplayBuffer:
-    def __init__(self, device, seed, data_dir, sematic=False):
+    def __init__(self, device, seed, data_dir, remove_noop=True, sematic=False):
         self.device = device
         self.seed = seed
         self.data_dir = data_dir
         self.rng = np.random.default_rng(seed=seed)
         self.semantic = sematic
-        self.buffer_size = 62002 - 100 if sematic else 62002  # Size of the imitation dataset i downloaded
+        self.remove_noop = remove_noop
+        if remove_noop:
+            # 24583 are observations with "Noop" action.
+            self.buffer_size = 62002 - 24583 if sematic else 62002 - 24583
+        else:
+            self.buffer_size = 62002 - 100 if sematic else 62002  # Size of the imitation dataset i downloaded
         self.actions = torch.empty(self.buffer_size, device=device, dtype=torch.int64)
         self.episode_start_idx = []
 
+        self.unique_labels = []
         if not sematic:
             self.states = torch.empty((self.buffer_size, 3, 64, 64), device=device, dtype=torch.float32)
             self._populate_image()
@@ -104,10 +109,12 @@ class CrafterReplayBuffer:
             with np.load(self.data_dir + os.sep + file) as data:
                 self.episode_start_idx.append(i)
                 for image, action in zip(data['image'], data['action']):
+                    if action == 0 and self.remove_noop: continue
                     self.states[i] = torch.tensor(np.moveaxis(image, -1, -3) / 255, dtype=torch.float32,
                                                   device=self.device)
                     self.actions[i] = torch.tensor(action, device=self.device)
                     i += 1
+        self.unique_labels = torch.unique(self.actions).detach().cpu().numpy()
         assert i == self.buffer_size, "Not all data was loaded!"
 
     def _populate_semantic(self):
@@ -116,18 +123,33 @@ class CrafterReplayBuffer:
             with np.load(self.data_dir + os.sep + file) as data:
                 self.episode_start_idx.append(i)
                 for semantic, action in zip(data['local_semantics'], data['actions']):
+                    if action == 0 and self.remove_noop: continue
                     self.states[i] = torch.tensor(semantic, dtype=torch.float32, device=self.device).unsqueeze(dim=0)
                     self.actions[i] = torch.tensor(action, device=self.device)
                     i += 1
+        self.unique_labels = torch.unique(self.actions).detach().cpu().numpy()
         assert i == self.buffer_size, "Not all data was loaded!"
 
-    def sample(self, batch_size, replace=False) -> tuple:
+    def sample(self, batch_size, replace=False, balance=False) -> tuple:
         """
         :param batch_size:
         :param replace: if replace is set to true, a batch can contain the same state twice
         """
-        ind = self.rng.choice(range(self.buffer_size), size=batch_size, replace=replace)
-        return self.states[ind], self.actions[ind]
+        if not balance:
+            ind = self.rng.choice(range(self.buffer_size), size=batch_size, replace=replace)
+            return self.states[ind], self.actions[ind]
+        else:
+            samples_per_label = batch_size // len(self.unique_labels)
+            indices = []
+            while len(indices) < batch_size:
+                for label in self.unique_labels:
+                    label_indices = torch.where(self.actions == label)[0].detach().cpu().numpy()
+                    if len(label_indices) == 0:
+                        continue
+                    np.random.shuffle(label_indices)
+                    selected_indices = label_indices[:samples_per_label]
+                    indices.extend(selected_indices)
+            return self.states[indices], self.actions[indices]
 
     def sample_trajectory(self) -> tuple:
         """
@@ -164,21 +186,36 @@ def simplify_actions(actions: torch.tensor) -> torch.tensor:
     15 Make Stone Sword     => 7 Make Weapon
     16 Make Iron Sword      => 7 Make Weapon
     """
-    remap_dict = {0: 0, 1: 1, 2: 1, 3: 1, 4: 1, 5: 2, 6: 3, 7: 4, 8: 4, 9: 4, 10: 5, 11: 6, 12: 6, 13: 6, 14: 7,
-                  15: 7, 16: 7}
+    remap_dict = {0: 0,
+                  1: 1,
+                  2: 1,
+                  3: 1,
+                  4: 1,
+                  5: 2,
+                  6: 3,
+                  7: 4,
+                  8: 5,
+                  9: 6,
+                  10: 7,
+                  11: 6,
+                  12: 8,
+                  13: 9,
+                  14: 10,
+                  15: 11,
+                  16: 12}
     remap_function = np.vectorize(lambda x: remap_dict.get(x, x))
     return torch.from_numpy(remap_function(actions.cpu())).to(actions.device)
 
 
 if __name__ == '__main__':
     buffer = CrafterReplayBuffer('cuda', 5, './dataset')
-    _states, _actions = buffer.sample(batch_size=23)
+    _states, _actions = buffer.sample(batch_size=256, balance=True)
     print(f"States shape {_states.shape}, device: {_states.device}, actions shape {_actions.shape}")
     _states, _actions = buffer.sample_trajectory()
     print(f"States shape {_states.shape}, device: {_states.device}, actions shape {_actions.shape}")
 
     buffer = CrafterReplayBuffer('cuda', 5, './dataset-semantic', sematic=True)
-    _states, _actions = buffer.sample(batch_size=23)
+    _states, _actions = buffer.sample(batch_size=256, balance=True)
     print(f"States shape {_states.shape}, device: {_states.device}, actions shape {_actions.shape}")
     _states, _actions = buffer.sample_trajectory()
     print(f"States shape {_states.shape}, device: {_states.device}, actions shape {_actions.shape}")
