@@ -3,7 +3,7 @@ import copy
 import json
 import os
 from multiprocessing import Pool
-
+import numpy as np
 import pandas as pd
 import torch
 import torch.nn as nn
@@ -26,7 +26,7 @@ def train(net, optim, alpha1, alpha2, beta, inv_temp, psm_func, buffer, loss_bc,
           augmentation=augmentations.identity):
     net.train()
     alignment_loss = cross_entropy_loss = torch.tensor(0)
-
+    metric_values, similarity_matrix = None, None
     if alpha1 != 0:
         statesX, actionsX = buffer.sample_trajectory()
         statesY, actionsY = buffer.sample_trajectory()
@@ -55,7 +55,7 @@ def train(net, optim, alpha1, alpha2, beta, inv_temp, psm_func, buffer, loss_bc,
     total_loss.backward()
     optim.step()
 
-    return total_loss.item(), alignment_loss.item(), cross_entropy_loss.item()
+    return total_loss.item(), alignment_loss.item(), cross_entropy_loss.item(), metric_values, similarity_matrix
 
 
 @torch.no_grad()
@@ -100,7 +100,7 @@ def main(hyperparams: dict, train_dir: str, experiment_id: str):
                      hyperparams['lambda'], psm_func, buffer, loss_bc, hyperparams['batch_size'],
                      augmentations.aug_map[hyperparams['augmentation']])
 
-        total_err, contrastive_err, cross_entropy_err = info
+        total_err, contrastive_err, cross_entropy_err, metric_values, similarity_matrix = info
         test_err = evaluate(net, buffer, hyperparams['batch_size'])
 
         loss_dict = {"Total loss": total_err, "Contrastive loss": contrastive_err, "BC loss": cross_entropy_err,
@@ -111,18 +111,25 @@ def main(hyperparams: dict, train_dir: str, experiment_id: str):
             lr_decay.step()
 
         print(f"Iteration {step}. Loss: {total_err:2.3f}")
-        #if step % 1000 == 0 and step != 0:
-        #    solved_train, avg_reward_train, avg_steps_train = validate(net, start_level=0, num_levels=20)
-        #    solved_test, avg_reward_test, avg_steps_test = validate(net, start_level=1000000, num_levels=20)
-        #    wandb.log({
-        #        "solved_train": solved_train,
-        #        "solved_test": solved_test,
-        #        "avg_reward_train": avg_reward_train,
-        #        "avg_reward_test": avg_reward_test,
-        #        "avg_steps_train": avg_steps_train,
-        #        "avg_steps_test": avg_steps_test,
+        if step % 2000 == 0 and step != 0:
+            solved_train, avg_reward_train, avg_steps_train = validate(net, start_level=100, num_levels=29)
+            solved_test, avg_reward_test, avg_steps_test = validate(net, start_level=1000000, num_levels=20)
+            wandb.log({
+                "solved_train": solved_train,
+                "solved_test": solved_test,
+                "avg_reward_train": avg_reward_train,
+                "avg_reward_test": avg_reward_test,
+                "avg_steps_train": avg_steps_train,
+                "avg_steps_test": avg_steps_test,
+                "Sim matrix": wandb.Image(similarity_matrix),
+                "Metric values": wandb.Image(metric_values),
+            }, step=step)
 
-        #    }, step=step)
+            if step % 5000 == 0 and hyperparams['alpha1'] != 0:
+                similarity_matrix = similarity_matrix.detach().cpu().numpy()
+                metric_values = metric_values.detach().cpu().numpy()
+                np.savez(train_dir + os.sep + run_name + f"-{step}", sim_matrix=similarity_matrix,
+                         metric_values=metric_values)
     state = {
         'state_dict': net.state_dict(),
         'optimizer': optimizer.state_dict(),
@@ -151,9 +158,9 @@ if __name__ == '__main__':
     parser.add_argument("-bs", "--batch_size", default=256, type=int,
                         help="Size of one Minibatch")
 
-    parser.add_argument("-lr", "--learning_rate", default=0.006, type=float,
+    parser.add_argument("-lr", "--learning_rate", default=0.01, type=float,
                         help="Learning rate for the optimizer")
-    parser.add_argument("-K", "--n_iterations", default=40_000, type=int,
+    parser.add_argument("-K", "--n_iterations", default=100_000, type=int,
                         help="Number of total training steps")
 
     parser.add_argument("-a1", "--alpha1", default=5., type=float,
@@ -165,7 +172,7 @@ if __name__ == '__main__':
     parser.add_argument("-b", "--beta", default=1.0, type=float,
                         help="Scaling factor for the PSM")
 
-    parser.add_argument("-ld", "--learning_decay", default=0.999, type=float,
+    parser.add_argument("-ld", "--learning_decay", default=0.995, type=float,
                         help="learning rate decay")
 
     parser.add_argument("-wd", "--weight_decay", default=0.0, type=float,
@@ -174,7 +181,7 @@ if __name__ == '__main__':
     parser.add_argument("-l", "--lambda", default=0.5, type=float,
                         help="Inverse temperature")
 
-    parser.add_argument("-aug", "--augmentation", default="conv",
+    parser.add_argument("-aug", "--augmentation", default="identity",
                         choices=list(augmentations.aug_map.keys()),
                         help="The augmentation that should be applied to the states")
 

@@ -116,7 +116,7 @@ def gaussian_blur(images: torch.tensor, kernel_size: int = 3, sigma: float = .6)
     return torch.clip(blur_img, torch.min(images), torch.max(images))
 
 
-def random_noise(images: torch.tensor, strength=0.05) -> torch.tensor:
+def random_noise(images: torch.tensor, strength=0.1) -> torch.tensor:
     noise = torch.normal(0, strength, size=images.shape, device=images.device)
     # make sure we dont have illegal pixel values (i.e.: 255.3 or 1.1)
     return torch.clip(images + noise, torch.min(images), torch.max(images))

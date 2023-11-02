@@ -7,11 +7,11 @@ from gym import spaces
 
 class VanillaEnv(gym.Env):
 
-    def __init__(self, start_level=0, num_levels=0, render_mode="rgb_array"):
+    def __init__(self, start_level=0, num_levels=0, distribution_mode="easy", render_mode="rgb_array"):
         # dist mode hard => 17
         # dist mode easy => 13
         self.actual_env = gym.make('procgen:procgen-coinrun-v0', start_level=start_level, paint_vel_info=True,
-                                   num_levels=num_levels, render_mode=render_mode)
+                                   num_levels=num_levels, distribution_mode=distribution_mode, render_mode=render_mode)
 
         self.action_space = self.actual_env.action_space
         # Example for using image as input (channel-first; channel-last also works):
@@ -45,8 +45,8 @@ class CoinRunReplayBuffer:
         self.buffer_size = self._calc_buffer_size() 
         self.rng = np.random.default_rng(seed=seed)
 
-        self.states = torch.empty((self.buffer_size, 3, 64, 64), device=device, dtype=torch.float32)
-        self.actions = torch.empty(self.buffer_size, device=device, dtype=torch.int64)
+        self.states = torch.empty((self.buffer_size, 3, 64, 64), dtype=torch.float32)
+        self.actions = torch.empty(self.buffer_size, dtype=torch.int8)
 
         self.episode_start_idx = []
 
@@ -77,7 +77,7 @@ class CoinRunReplayBuffer:
         :param replace: if replace is set to true, a batch can contain the same state twice
         """
         ind = self.rng.choice(range(self.buffer_size), size=batch_size, replace=replace)
-        return self.states[ind], self.actions[ind]
+        return self.states[ind].to(self.device), self.actions[ind].to(self.device).to(torch.int64)
 
     def sample_trajectory(self) -> tuple:
         """
@@ -87,16 +87,19 @@ class CoinRunReplayBuffer:
         next_idx = idx + 1 if idx != len(self.episode_start_idx) - 1 else None
 
         if next_idx:
-            return self.states[self.episode_start_idx[idx]:self.episode_start_idx[next_idx]], \
-                self.actions[self.episode_start_idx[idx]:self.episode_start_idx[next_idx]]
+            return self.states[self.episode_start_idx[idx]:self.episode_start_idx[next_idx]].to(self.device), \
+                self.actions[self.episode_start_idx[idx]:self.episode_start_idx[next_idx]].to(self.device)
         else:
-            return self.states[self.episode_start_idx[idx]:], self.actions[self.episode_start_idx[idx]:]
+            return self.states[self.episode_start_idx[idx]:].to(self.device), \
+                self.actions[self.episode_start_idx[idx]:].to(self.device)
 
 
 if __name__ == '__main__':
-    buffer = CoinRunReplayBuffer('cpu', 0, './coinrun/dataset/seeds-0-9')
+    buffer = CoinRunReplayBuffer('cpu', 0, './coinrun/expert-dataset/easy')
     print(buffer.sample(batch_size=23)[0].shape)
     print(buffer.sample_trajectory()[0].shape)
+    state = buffer.sample(batch_size=23)[0]
+    print(f"Min: {state.min()}, max: {state.max()}")
 
     _env = VanillaEnv()
     _obs_arr = [_env.reset(), _env.step(0)[0], _env.step(0)[0], _env.step(0)[0], _env.step(1)[0]]
