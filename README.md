@@ -6,7 +6,8 @@ The following section will contain all commands used to run the different experi
 that for CoinRun and crafter additional demonstration datasets are needed which are NOT included
 in this repository. The jumping task experiments can be run without an additional dataset.
 
-All experiments where performed on a system running on an intel core i5-13600K and an Nvidia GTX 1660 SUPER.
+All experiments where performed on a system running on an intel core i5-13600K and an Nvidia GTX 1660 SUPER with 
+32GB RAM and 6 GB VRAM.
 The jumping task experiments took 12-20 minutes on average per run. The crafter experiments took 8-14 hours 
 and the coinrun experiments took 2-5 hours. 
 

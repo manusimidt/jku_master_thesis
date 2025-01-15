@@ -112,8 +112,8 @@ def main(hyperparams: dict, train_dir: str, experiment_id: str):
 
         print(f"Iteration {step}. Loss: {total_err:2.3f}")
         if step % 2000 == 0 and step != 0:
-            solved_train, avg_reward_train, avg_steps_train = validate(net, start_level=100, num_levels=29)
-            solved_test, avg_reward_test, avg_steps_test = validate(net, start_level=1000000, num_levels=20)
+            solved_train, avg_reward_train, avg_steps_train = validate(net, start_level=100, num_levels=30)
+            solved_test, avg_reward_test, avg_steps_test = validate(net, start_level=1000000, num_levels=30)
             wandb.log({
                 "solved_train": solved_train,
                 "solved_test": solved_test,
